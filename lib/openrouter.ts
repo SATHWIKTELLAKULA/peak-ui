@@ -7,13 +7,9 @@
 export enum PeakModel {
     CODE = "openai/gpt-5.2-codex",
     PRO = "anthropic/claude-4.6-opus",
-    FLASH = "openai/gpt-5.2-pro", // Changed per request: General Chat must use openai/gpt-5.2-pro
-    CREATIVE = "openai/gpt-5.2-pro", // Match Flash for text base
-    CODEX = "openai/gpt-5.2-codex",
-    OPUS = "anthropic/claude-4.6-opus",
-    GPT_PRO = "openai/gpt-5.2-pro",
-    CLAUDE_FALLBACK = "anthropic/claude-opus-4.5",
-    DEFAULT = "openai/gpt-5.2-pro" // Changed default to GPT-5.2 Pro
+    FLASH = "openai/gpt-5.2-pro",
+    CREATIVE = "openai/gpt-5.2-pro",
+    DEFAULT = "openai/gpt-5.2-pro"
 }
 
 export interface LLMConfig {
@@ -33,10 +29,10 @@ export async function callOpenRouter(
     // 1. Dynamic Authentication
     let apiKey = process.env.OPENROUTER_API_KEY;
 
-    if (model.startsWith("openai/")) {
-        apiKey = process.env.OPENROUTER_KEY_OPENAI || apiKey;
-    } else if (model.startsWith("anthropic/")) {
-        apiKey = process.env.OPENROUTER_KEY_ANTHROPIC || apiKey;
+    if (model.startsWith("openai/") && process.env.OPENROUTER_KEY_OPENAI) {
+        apiKey = process.env.OPENROUTER_KEY_OPENAI;
+    } else if (model.startsWith("anthropic/") && process.env.OPENROUTER_KEY_ANTHROPIC) {
+        apiKey = process.env.OPENROUTER_KEY_ANTHROPIC;
     }
 
     if (!apiKey) {
@@ -49,7 +45,8 @@ export async function callOpenRouter(
     let payloadMessages = messages || [{ role: "user", content: query }];
 
     // Inject System Prompt for Language
-    const systemPrompt = `You are Peak AI. Respond ONLY in English. Use other languages only if explicitly requested.`;
+    // STRICT REQUIREMENT: Default to English.
+    const systemPrompt = `You are Peak AI. Respond primarily in English. only answer in another language if the user explicitly requests it.`;
 
     // Prepend system prompt if not present
     if (!payloadMessages.some((m: any) => m.role === "system")) {
