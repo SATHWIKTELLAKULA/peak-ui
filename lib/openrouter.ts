@@ -66,7 +66,7 @@ export async function callOpenRouter(
         const body: any = {
             model: model,
             messages: payloadMessages,
-            max_tokens: config.maxTokens || 4000,
+            max_tokens: config.maxTokens || 200, // Reduced default to 200 to prevent credit issues
             ...config // Inject effort, thinking, etc.
         };
 
@@ -86,6 +86,12 @@ export async function callOpenRouter(
 
         if (!response.ok) {
             const errorText = await response.text();
+
+            // Handle Credit Limit / Quota Errors (402 Payment Required or related)
+            if (response.status === 402 || errorText.toLowerCase().includes("credit") || errorText.toLowerCase().includes("quota") || errorText.toLowerCase().includes("insufficient")) {
+                throw new Error("I am resting for a moment. Please try again in a few minutes or switch to a different mode.");
+            }
+
             throw new Error(`OpenRouter API error ${response.status}: ${errorText}`);
         }
 
