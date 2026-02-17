@@ -240,6 +240,69 @@ async function callHuggingFaceImage(query: string) {
     }
 }
 
+// --- Helper: Hugging Face Video Generation (CogVideoX) ---
+async function callHuggingFaceVideo(query: string) {
+    const token = process.env.HUGGINGFACE_TOKEN;
+    if (!token) {
+        console.warn("HUGGINGFACE_TOKEN missing. Skipping HF video.");
+        return null;
+    }
+
+    const modelId = "THUDM/CogVideoX-5b";
+    const apiUrl = `https://api-inference.huggingface.co/models/${modelId}`;
+
+    // Retry logic parameters
+    const maxRetries = 5;
+    const retryDelay = 5000; // 5 seconds
+
+    const cleanQuery = query.replace("/video", "").replace("/animate", "").trim();
+
+    console.log(`[Hugging Face] Director Mode: Generating video with ${modelId} for: "${cleanQuery}"`);
+
+    for (let i = 0; i < maxRetries; i++) {
+        try {
+            const response = await fetch(apiUrl, {
+                method: "POST",
+                headers: {
+                    "Authorization": `Bearer ${token}`,
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ inputs: cleanQuery }),
+            });
+
+            if (response.status === 503) {
+                // Model is loading
+                const data = await response.json();
+                const estimatedTime = data.estimated_time || retryDelay / 1000;
+                console.warn(`[Hugging Face] Model loading. Retrying in ${estimatedTime}s... (Attempt ${i + 1}/${maxRetries})`);
+                await new Promise(resolve => setTimeout(resolve, estimatedTime * 1000));
+                continue;
+            }
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`HF Video API Error ${response.status}: ${errorText}`);
+            }
+
+            // Success - Video blob returned
+            const blob = await response.blob();
+            const arrayBuffer = await blob.arrayBuffer();
+            const buffer = Buffer.from(arrayBuffer);
+            const base64 = buffer.toString('base64');
+
+            // Return data URI for video (mp4 usually)
+            return `VIDEO_DATA:data:video/mp4;base64,${base64}`;
+
+        } catch (e) {
+            console.error(`[Hugging Face] Video generation attempt ${i + 1} failed:`, e);
+            if (i === maxRetries - 1) return null; // Fallback after all retries
+            await new Promise(resolve => setTimeout(resolve, 2000)); // Standard backoff
+        }
+    }
+
+    return null;
+}
+
 // --- Helper: Bytez Primary ---
 async function callBytez(query: string, mode: string = "chat", messages?: any[], quality: string = "standard", lang: string = "en") {
     // 1. Smart Trigger: Check for "free" or "fast" keywords in Image/Video mode
@@ -277,8 +340,24 @@ async function callBytez(query: string, mode: string = "chat", messages?: any[],
         return callPollinationsImage(query);
     }
 
+    // --- DIRECTOR MODE (Video) ---
     if (isVideoMode) {
-        console.log("[Director Mode] Switching to Pollinations.ai (Video)");
+        console.log("[Director Mode] Engaged.");
+
+        // 1. Try Hugging Face (CogVideoX)
+        if (process.env.HUGGINGFACE_TOKEN && !lowerQuery.includes("pollinations")) {
+            console.log("[Director Mode] Using Hugging Face (CogVideoX-5b)...");
+            const hfVideo = await callHuggingFaceVideo(query);
+            if (hfVideo) {
+                return {
+                    detailed_answer: hfVideo,
+                    direct_answer: "Scene rendered with CogVideoX-5b."
+                };
+            }
+            console.warn("[Director Mode] Hugging Face failed, falling back to Pollinations...");
+        }
+
+        console.log("[Director Mode] Switching to Pollinations.ai (Video Fallback)");
         // Video might be too slow to enhance, but let's try if it's explicitly anime
         if (lowerQuery.includes("anime")) {
             const styleRef = await fetchAnimeStyleReference();
