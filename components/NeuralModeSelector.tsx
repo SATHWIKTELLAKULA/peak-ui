@@ -1,7 +1,7 @@
 "use client";
 
 import { motion, AnimatePresence } from "framer-motion";
-import { Zap, Brain, Palette, Lock, Image as ImageIcon, Eye, Clapperboard, Sparkles } from "lucide-react";
+import { Zap, Brain, Palette, Lock, Image as ImageIcon, Eye, Clapperboard, Sparkles, Terminal } from "lucide-react";
 import { useSettings, NeuralMode, CreativeSubMode } from "@/contexts/SettingsContext";
 import { useState, useEffect } from "react";
 import { supabaseBrowser } from "@/lib/supabaseClient";
@@ -35,6 +35,16 @@ const MODES: {
             description: "Deep reasoning",
             color: "#7c3aed",
             glowColor: "rgba(124,58,237,0.25)",
+            requiresAuth: false,
+        },
+        {
+            id: "code",
+            label: "Code",
+            icon: Terminal,
+            emoji: "💻",
+            description: "Engineering",
+            color: "#10b981",
+            glowColor: "rgba(16,185,129,0.25)",
             requiresAuth: false,
         },
         {

@@ -6,7 +6,7 @@ import { createContext, useContext, useState, useEffect, ReactNode } from "react
 export type BgPreset = "nebula-core" | "black-hole" | "supernova";
 export type ResponseLength = "concise" | "detailed";
 export type VoiceGender = "male" | "female";
-export type NeuralMode = "flash" | "pro" | "creative";
+export type NeuralMode = "flash" | "pro" | "creative" | "code";
 export type CreativeSubMode = "visualize" | "analyze" | "director";
 export type VideoQuality = "standard" | "hq";
 export type CelestialTheme = "neural" | "galaxy" | "planet" | "sun";
@@ -84,7 +84,8 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
                 if (parsed.videoQuality) setVideoQuality(parsed.videoQuality);
                 if (parsed.celestialTheme) setCelestialTheme(parsed.celestialTheme);
                 if (parsed.globalTheme) setGlobalTheme(parsed.globalTheme);
-                if (parsed.language) setLanguage(parsed.language);
+                // Language always resets to English on reload as per policy
+                // if (parsed.language) setLanguage(parsed.language);
             }
         } catch { /* ignore */ }
         setLoaded(true);
@@ -95,10 +96,10 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         try {
             localStorage.setItem(
                 "peak-settings",
-                JSON.stringify({ bgPreset, responseLength, voiceGender, neuralMode, creativeSubMode, videoQuality, celestialTheme, globalTheme, language })
+                JSON.stringify({ bgPreset, responseLength, voiceGender, neuralMode, creativeSubMode, videoQuality, celestialTheme, globalTheme })
             );
         } catch { /* ignore */ }
-    }, [bgPreset, responseLength, voiceGender, neuralMode, creativeSubMode, videoQuality, celestialTheme, globalTheme, language, loaded]);
+    }, [bgPreset, responseLength, voiceGender, neuralMode, creativeSubMode, videoQuality, celestialTheme, globalTheme, loaded]);
 
     return (
         <SettingsContext.Provider
