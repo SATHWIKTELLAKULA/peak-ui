@@ -27,17 +27,20 @@ export async function callOpenRouter(
     config: LLMConfig = {}
 ) {
     // 1. Dynamic Authentication
-    let apiKey = process.env.OPENROUTER_API_KEY;
+    let apiKey: string | undefined;
 
-    if (model.startsWith("openai/") && process.env.OPENROUTER_KEY_OPENAI) {
+    if (model.startsWith("openai/")) {
         apiKey = process.env.OPENROUTER_KEY_OPENAI;
-    } else if (model.startsWith("anthropic/") && process.env.OPENROUTER_KEY_ANTHROPIC) {
+    } else if (model.startsWith("anthropic/")) {
         apiKey = process.env.OPENROUTER_KEY_ANTHROPIC;
     }
 
+    // Fallback for other providers or unmapped models if needed, but per request we strictly use these two.
+    // If the user adds other models later, they will need to add mappings here.
+
     if (!apiKey) {
-        console.error(`[LLM Service] Error: API Key missing for model ${model}`);
-        throw new Error("API key not configured for " + model);
+        console.error(`[LLM Service] Error: No specific API Key configured for model prefix: ${model}`);
+        throw new Error("Missing OpenRouter Key for model: " + model);
     }
 
     // 2. Prepare Payload
@@ -46,7 +49,8 @@ export async function callOpenRouter(
 
     // Inject System Prompt for Language
     // STRICT REQUIREMENT: Default to English.
-    const systemPrompt = `You are Peak AI. Respond primarily in English. only answer in another language if the user explicitly requests it.`;
+    // Strict Language Requirement
+    const systemPrompt = `You are Peak AI. Respond ONLY in English. Only answer in another language if the user explicitly requests it.`;
 
     // Prepend system prompt if not present
     if (!payloadMessages.some((m: any) => m.role === "system")) {
