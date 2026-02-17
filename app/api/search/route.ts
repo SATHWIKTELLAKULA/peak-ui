@@ -188,7 +188,7 @@ async function enhanceAnimePrompt(userQuery: string, styleReference: string): Pr
     }
 }
 
-// --- Helper: Hugging Face Image Generation (FLUX) ---
+// --- Helper: Hugging Face Image Generation (FLUX - High Quality) ---
 async function callHuggingFaceImage(query: string) {
     const token = process.env.HUGGINGFACE_TOKEN;
     if (!token) {
@@ -196,8 +196,13 @@ async function callHuggingFaceImage(query: string) {
         return null;
     }
 
+    // Enhanced Prompt for Photorealism
+    const enhancedQuery = `${query}, 4K, highly detailed, photorealistic, masterpiece, 8k resolution`;
+
     try {
-        console.log(`[Hugging Face] Generating image with FLUX.1-schnell for: "${query}"`);
+        console.log(`[Hugging Face] Generating image with FLUX.1-schnell for: "${enhancedQuery}"`);
+
+        // Direct HF Inference API call
         const response = await fetch(
             "https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell",
             {
@@ -207,7 +212,13 @@ async function callHuggingFaceImage(query: string) {
                     "Content-Type": "application/json",
                     "x-use-cache": "false"
                 },
-                body: JSON.stringify({ inputs: query }),
+                body: JSON.stringify({
+                    inputs: enhancedQuery,
+                    parameters: {
+                        width: 1024,
+                        height: 1024
+                    }
+                }),
             }
         );
 
