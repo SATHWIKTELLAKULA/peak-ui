@@ -498,9 +498,46 @@ async function callBytez(query: string, mode: string = "chat", messages?: any[],
         return await callOpenRouter(query, messages, PeakModel.FLASH, lang);
     }
 
-    // 3. CHAT MODE
+    // 3. CHAT MODE (with "Grounding" Check)
     if (mode === "chat") {
         console.log("[Chat Mode] Routing to PeakModel.DEFAULT...");
+
+        // Smart Grounding: Check for "Live" keywords
+        const lowerQ = query.toLowerCase();
+        const liveKeywords = ["price", "news", "current", "stock", "usd", "weather", "latest", "today", "now", "live"];
+        const needsGrounding = liveKeywords.some(k => lowerQ.includes(k));
+
+        if (needsGrounding) {
+            console.log("[Chat Mode] Detected need for live data. Fetching Tavily context...");
+            const tavilyData = await callTavily(query);
+            if (tavilyData) {
+                const searchContext = `\n\n[REAL-TIME SEARCH CONTEXT]:\n${tavilyData}\n\nUse this context to answer accurately.`;
+                const enrichedQuery = query + searchContext;
+
+                // If messages exist, we need to inject context into the last message
+                if (messages && messages.length > 0) {
+                    const lastMsg = messages[messages.length - 1];
+                    // Clone to avoid mutation issues if any
+                    const newMessages = [...messages];
+                    if (typeof lastMsg.content === 'string') {
+                        newMessages[newMessages.length - 1] = { ...lastMsg, content: lastMsg.content + searchContext };
+                    } else if (Array.isArray(lastMsg.content)) {
+                        // Multimodal array - append to text part
+                        const textPart = lastMsg.content.find((p: any) => p.type === "text");
+                        if (textPart) {
+                            textPart.text += searchContext;
+                        } else {
+                            // fallback
+                            lastMsg.content.push({ type: "text", text: searchContext });
+                        }
+                    }
+                    return await callOpenRouter(query, newMessages, PeakModel.DEFAULT, lang);
+                }
+
+                return await callOpenRouter(enrichedQuery, messages, PeakModel.DEFAULT, lang);
+            }
+        }
+
         return await callOpenRouter(query, messages, PeakModel.DEFAULT, lang);
     }
 

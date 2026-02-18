@@ -5,12 +5,12 @@
  */
 
 export enum PeakModel {
-    CODE = "meta-llama/llama-3.1-8b-instruct:free",
-    PRO = "meta-llama/llama-3.1-8b-instruct:free",
-    FLASH = "meta-llama/llama-3.1-8b-instruct:free",
-    THINK = "meta-llama/llama-3.1-8b-instruct:free",
-    CREATIVE = "meta-llama/llama-3.1-8b-instruct:free",
-    DEFAULT = "meta-llama/llama-3.1-8b-instruct:free"
+    CODE = "openai/gpt-4o-mini",
+    PRO = "openai/gpt-4o-mini",
+    FLASH = "openai/gpt-4o-mini",
+    THINK = "openai/gpt-4o-mini",
+    CREATIVE = "openai/gpt-4o-mini",
+    DEFAULT = "openai/gpt-4o-mini"
 }
 
 export interface LLMConfig {
