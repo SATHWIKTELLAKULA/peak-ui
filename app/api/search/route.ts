@@ -1,6 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { bytez } from "@/lib/bytez";
 import { callOpenRouter, PeakModel } from "@/lib/openrouter";
+import jwt from "jsonwebtoken";
+import { supabase } from "@/lib/supabase";
+
+async function logErrorToSupabase(error: any, context: string) {
+    if (!supabase) return;
+    try {
+        await supabase.from("error_logs").insert({
+            error_message: error instanceof Error ? error.message : String(error),
+            context,
+            timestamp: new Date().toISOString(),
+        });
+    } catch (e) {
+        console.error("Failed to log to Supabase:", e);
+    }
+}
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -303,12 +318,195 @@ async function callHuggingFaceVideo(query: string) {
     return null;
 }
 
+// --- Helper: Kling AI (Direct Mode) ---
+async function callKlingAI(query: string) {
+    const accessKey = process.env.KLING_ACCESS_KEY;
+    const secretKey = process.env.KLING_SECRET_KEY;
+
+    if (!accessKey || !secretKey) {
+        console.warn("KLING_ACCESS_KEY or KLING_SECRET_KEY missing. Skipping Kling AI.");
+        return null;
+    }
+
+    // 1. Generate JWT
+    const token = jwt.sign(
+        {
+            iss: accessKey,
+            exp: Math.floor(Date.now() / 1000) + 1800, // 30 mins
+            nbf: Math.floor(Date.now() / 1000) - 5,
+        },
+        secretKey,
+        { algorithm: "HS256", header: { alg: "HS256", typ: "JWT" } }
+    );
+
+    console.log(`[Director Mode] Generated Kling Auth Token.`);
+
+    try {
+        // 2. Submit Task
+        console.log(`[Director Mode] Submitting to Kling AI (Singapore)... Query: "${query}"`);
+        const submitResponse = await fetch("https://api-singapore.klingai.com/v1/videos/text2video", {
+            method: "POST",
+            headers: {
+                "Authorization": `Bearer ${token}`,
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+                model: "kling-v1", // Default model identifier
+                prompt: query,
+                duration: "5", //  "5" usually maps to 5s standard
+                aspect_ratio: "16:9",
+                // callback_url: "..." // Optional
+            }),
+        });
+
+        if (!submitResponse.ok) {
+            const errorText = await submitResponse.text();
+            throw new Error(`Kling Submit Failed ${submitResponse.status}: ${errorText}`);
+        }
+
+        const submitData = await submitResponse.json();
+        // Check for task_id in data.data.task_id or similar structure. Kling API often wraps in { code: 0, message: "", data: { task_id: ... } }
+        // Let's assume standard structure based on docs or common practice.
+        const taskId = submitData.data?.task_id || submitData.task_id;
+
+        if (!taskId) {
+            throw new Error(`No task_id returned. Response: ${JSON.stringify(submitData)}`);
+        }
+
+        console.log(`[Director Mode] Task ID: ${taskId}. Polling for result...`);
+
+        // 3. Poll for Result
+        const maxAttempts = 20; // 20 * 5s = 100s, theoretically. User asked for 15s interval.
+        // User asked for 15s interval. 60s timeout limit means max 4 checks.
+        // We will try to fit within timeout context or return intermediate status if we could (but route currently returns final).
+        // Given polling requirement "every 15 seconds", we do:
+
+        for (let i = 0; i < 10; i++) { // Try up to 150s (if function allows). Vercel limit will cut it off.
+            await new Promise((resolve) => setTimeout(resolve, 15000)); // 15s interval
+
+            const checkResponse = await fetch(`https://api-singapore.klingai.com/v1/videos/text2video/${taskId}`, {
+                method: "GET",
+                headers: {
+                    "Authorization": `Bearer ${token}`,
+                },
+            });
+
+            if (!checkResponse.ok) continue;
+
+            const checkData = await checkResponse.json();
+            const taskStatus = checkData.data?.task_status || checkData.task_status; // 'submitted', 'processing', 'succeed', 'failed'
+
+            console.log(`[Director Mode] Status: ${taskStatus}`);
+
+            if (taskStatus === "succeed" || taskStatus === "success") {
+                const videos = checkData.data?.task_result?.videos || checkData.task_result?.videos;
+                if (videos && videos.length > 0) {
+                    const videoUrl = videos[0].url;
+
+                    // Increment Usage in Supabase
+                    if (supabase) {
+                        try {
+                            const today = new Date().toISOString().split('T')[0];
+                            const { data } = await supabase.from("system_stats").select("kling_usage").eq("date", today).single();
+                            const current = data?.kling_usage || 0;
+                            await supabase.from("system_stats").upsert({ date: today, kling_usage: current + 11 }, { onConflict: "date" });
+                        } catch (err) { console.error("Failed to update Kling usage", err); }
+                    }
+
+                    return `VIDEO_DATA:${videoUrl}`;
+                }
+            } else if (taskStatus === "failed") {
+                throw new Error(`Kling Task Failed: ${checkData.data?.task_status_msg || "Unknown error"}`);
+            }
+        }
+
+        throw new Error("Polling timed out. Video might still be processing.");
+
+    } catch (e: any) {
+        console.error("[Director Mode] Kling AI Failed:", e);
+        await logErrorToSupabase(e, "Kling AI Video Generation");
+
+        // Check for credit/quota specific errors
+        const errorMsg = e.message || String(e);
+        if (errorMsg.includes("402") || errorMsg.includes("429") || errorMsg.includes("insufficient") || errorMsg.includes("credit") || errorMsg.includes("quota") || errorMsg.includes("balance")) {
+            throw new Error("Our Director is currently busy filming. Please come back tomorrow for your next masterpiece!");
+        }
+        return null; // Fallback to other providers
+    }
+}
+
+// --- Helper: Puter.js (General Chat) ---
+async function callPuter(query: string, messages?: any[]) {
+    try {
+        // Dynamic import to handle SSR/Edge constraints
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const puter = require('@heyputer/puter.js').default || require('@heyputer/puter.js');
+
+        console.log("[Puter] Generating response via gpt-5-nano...");
+
+        // Construct prompt from messages if available
+        let prompt = query;
+        if (messages && messages.length > 0) {
+            prompt = messages.map((m: any) => `${m.role}: ${m.content}`).join("\n");
+        }
+
+        // Attempt to use Puter AI Chat
+        if (puter.ai && puter.ai.chat) {
+            const response = await puter.ai.chat(prompt, { model: 'gpt-5-nano' });
+            // Puter response format might vary, usually it returns a string or object
+            const text = typeof response === 'string' ? response : (response?.message?.content || JSON.stringify(response));
+
+            return {
+                detailed_answer: text,
+                direct_answer: text.slice(0, 150) + "..."
+            };
+        } else {
+            throw new Error("Puter AI module not found.");
+        }
+    } catch (e) {
+        console.warn("[Puter] Failed:", e);
+        return null;
+    }
+}
+
 // --- Helper: Bytez Primary ---
 async function callBytez(query: string, mode: string = "chat", messages?: any[], quality: string = "standard", lang: string = "en") {
     // 1. Smart Trigger: Check for "free" or "fast" keywords in Image/Video mode
     const lowerQuery = query.toLowerCase();
     const isImageMode = mode === "image" || mode === "visualize";
     const isVideoMode = mode === "video";
+
+    // --- MODE ROUTING ---
+
+    // 1. THINK MODE (DeepSeek R1)
+    if (mode === "think") {
+        console.log("[Think Mode] Routing to DeepSeek R1 (Reasoning)...");
+        return await callOpenRouter(query, messages, PeakModel.THINK, lang, { thinking: { type: "deep" } });
+    }
+
+    // 2. FLASH MODE (Cerebras Llama 3.1-8b)
+    if (mode === "flash") {
+        console.log("[Flash Mode] Engaged. Attempting Cerebras...");
+        const input = (messages && messages.length > 0) ? messages : query;
+        const cerebrasRes = await callCerebras(input);
+
+        if (cerebrasRes) return cerebrasRes;
+
+        console.warn("[Flash Mode] Cerebras failed, falling back to Gemini 2.0 Flash...");
+        return await callOpenRouter(query, messages, PeakModel.FLASH, lang);
+    }
+
+    // 3. CHAT MODE (Puter.js - GPT-5 Nano)
+    if (mode === "chat") {
+        console.log("[Chat Mode] Engaged. Attempting Puter.js...");
+        // Try Puter first
+        const puterResponse = await callPuter(query, messages);
+        if (puterResponse) return puterResponse;
+
+        console.warn("[Chat Mode] Puter failed, falling back to Flash (Gemini)...");
+        // Fallback to Gemini 2.0 Flash
+        return await callOpenRouter(query, messages, PeakModel.FLASH, lang);
+    }
 
     // --- HUGGING FACE (FLUX.1-schnell) - PRIMARY FOR IMAGE ---
     if (isImageMode && process.env.HUGGINGFACE_TOKEN && !lowerQuery.includes("pollinations")) {
@@ -344,7 +542,20 @@ async function callBytez(query: string, mode: string = "chat", messages?: any[],
     if (isVideoMode) {
         console.log("[Director Mode] Engaged.");
 
-        // 1. Try Hugging Face (CogVideoX)
+        // 1. Try Kling AI (Production)
+        if (process.env.KLING_ACCESS_KEY) {
+            console.log("[Director Mode] Using Kling AI (Singapore)...");
+            const klingVideo = await callKlingAI(query);
+            if (klingVideo) {
+                return {
+                    detailed_answer: klingVideo,
+                    direct_answer: "Scene rendered with Kling AI (Standard Mode)."
+                };
+            }
+            console.warn("[Director Mode] Kling AI failed, falling back to Hugging Face...");
+        }
+
+        // 2. Try Hugging Face (CogVideoX)
         if (process.env.HUGGINGFACE_TOKEN && !lowerQuery.includes("pollinations")) {
             console.log("[Director Mode] Using Hugging Face (CogVideoX-5b)...");
             const hfVideo = await callHuggingFaceVideo(query);
@@ -370,7 +581,7 @@ async function callBytez(query: string, mode: string = "chat", messages?: any[],
         return callPollinationsVideo(query);
     }
 
-    // --- ROUTING LOGIC: DUAL-MODEL STRATEGY ---
+    // --- OTHER MODES ---
 
     // 1. CODE MODE (Priority 1)
     if (mode === "code") {
@@ -412,131 +623,9 @@ async function callBytez(query: string, mode: string = "chat", messages?: any[],
         }
     }
 
-    // Select model for other modes (standard chat fallback, audio, etc)
-    let modelId = "meta-llama/Llama-3-8b-chat-hf"; // Default Chat 
-
-    switch (mode) {
-        case "vision":
-            modelId = "llava-hf/llava-1.5-7b-hf";
-            break;
-        case "visualize":
-        case "image":
-            modelId = "stabilityai/stable-diffusion-xl-base-1.0";
-            break;
-        case "audio":
-            modelId = "suno/bark";
-            break;
-        case "chat": // Flash Mode
-        case "creative": // Creative Mode Text
-        default:
-            // Standard Chat (Flash) routes to GPT-4o-mini (Cost Effective)
-            console.log(`[${mode} Mode] Routing to Primary: GPT-4o-mini`);
-            try {
-                return await callOpenRouter(query, messages, PeakModel.FLASH, lang);
-            } catch (e) {
-                console.warn(`[${mode} Mode] Primary Failed, enabling Fallback (GPT-3.5)`);
-                return await callOpenRouter(query, messages, PeakModel.DEFAULT, lang);
-            }
-    }
-
-    console.log(`[Bytez] Using model: ${modelId} for mode: ${mode}`);
-
-    const model = bytez.model(modelId);
-
-
-    // Construct input
-    // For Chat/Vision, usually passes the messages array or the last query
-    // If messages are present, use them. Otherwise use query.
-    // Bytez 'run' inputs depend on the model. 
-    // For safety with Llama-3-8b-chat-hf via Bytez, we try passing the query string or the full messages.
-    // Documentation isn't explicit on "chat-model" formatting for "run", so we'll try passing the raw query 
-    // for simple cases, and the messages array if provided.
-
-    let input: any = query;
-
-    // --- Auto-Enhance for Anime in Visualize Mode ---
-    if ((mode === "image" || mode === "visualize") && (input.toLowerCase().includes("anime") || input.toLowerCase().includes("manga"))) {
-        console.log("[Visualize] Detected Anime intent. Fetching style reference...");
-        const styleRef = await fetchAnimeStyleReference();
-        if (styleRef) {
-            const enhanced = await enhanceAnimePrompt(input, styleRef);
-            console.log(`[Visualize] Enhanced Prompt: ${enhanced}`);
-            input = enhanced;
-        }
-    }
-
-    // Chat mode handled by OpenRouter above, so input setup for Bytez chat is skipped
-
-    // ADDITIONAL STRICT Language Instruction for Bytez/OpenRouter
-    // Simplified Language Instruction
-    const systemPrompt = `You are Peak AI. Respond primarily in English. Only answer in another language if the user explicitly requests it.`;
-
-    // System prompt injection for Bytez handled here if needed (e.g. for vision?)
-    // But since chat mode uses OpenRouter directly, this block is unreachable for chat.
-    // Kept for structure if logic changes.
-
-    const response = await model.run(input);
-
-    if (response.error) {
-        throw new Error(`Bytez Error: ${response.error}`);
-    }
-
-    const output = response.output;
-
-    // Parse Output
-    // Output format depends on model. Text models usually return a string or an object with 'generated_text'.
-    // Image models return base64 or URL.
-
-    let content = "";
-
-    if (mode === "image") {
-        // Handle Image Output
-        if (Buffer.isBuffer(output)) {
-            const base64 = output.toString('base64');
-            content = `IMAGE_DATA:data:image/png;base64,${base64}`;
-        } else if (typeof output === "object" && output !== null) {
-            // Check for specific Bytez image response structure if it's not a direct buffer
-            // Using 'any' cast to safely check properties
-            const out: any = output;
-            if (out.image && typeof out.image === 'string') {
-                // base64 or url
-                content = `IMAGE_DATA:${out.image}`;
-            } else if (out instanceof ArrayBuffer) {
-                const buffer = Buffer.from(out);
-                const base64 = buffer.toString('base64');
-                content = `IMAGE_DATA:data:image/png;base64,${base64}`;
-            } else {
-                // Fallback: try to json stringify to debug or maybe it contains a url
-                content = JSON.stringify(output);
-            }
-        } else if (typeof output === "string") {
-            // Might be a URL or raw base64
-            if (output.startsWith("http") || output.startsWith("data:")) {
-                content = `IMAGE_DATA:${output}`;
-            } else {
-                // Assume it might be raw base64 if it's a long string without spaces
-                content = `IMAGE_DATA:data:image/png;base64,${output}`;
-            }
-        }
-    } else {
-        // Text / Chat Handling
-        if (typeof output === "string") {
-            content = output;
-        } else if (typeof output === "object") {
-            // Handle common structures
-            if (output.generated_text) content = output.generated_text;
-            else if (output.text) content = output.text;
-            else if (Array.isArray(output) && output[0]?.generated_text) content = output[0].generated_text;
-            else content = JSON.stringify(output); // Fallback
-        } else {
-            content = String(output);
-        }
-    }
-
-    return {
-        detailed_answer: content,
-        direct_answer: mode === "image" ? "Generating Visualization..." : (content.slice(0, 150) + "...")
-    };
+    // For any unhandled modes, fallback to Flash (Gemini)
+    console.log(`[Bytez] Default Fallback (Mode: ${mode}) -> Gemini 2.0 Flash`);
+    return await callOpenRouter(query, messages, PeakModel.FLASH, lang);
 }
 
 
@@ -581,6 +670,63 @@ function detectIntent(query: string): string | null {
 }
 
 
+
+
+// --- Helper: Cerebras API (Flash Mode - <1s Latency) ---
+async function callCerebras(input: string | any[]) {
+    const apiKey = process.env.CEREBRAS_API_KEY;
+    if (!apiKey) {
+        console.warn("CEREBRAS_API_KEY missing. Falling back...");
+        return null;
+    }
+
+    const messages = Array.isArray(input) ? input : [{ role: "user", content: input }];
+
+    // Strict Performance: Hardcode System Prompt to English
+    const finalMessages = [
+        { role: "system", content: "You are Peak AI. Respond concisely in English." },
+        ...messages.filter((m: any) => m.role !== "system")
+    ];
+
+    try {
+        console.log("[Flash Mode] Routing to Cerebras (Llama 3.1-8b)...");
+        const response = await fetch("https://api.cerebras.ai/v1/chat/completions", {
+            method: "POST",
+            headers: {
+                "Authorization": `Bearer ${apiKey}`,
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+                model: "llama3.1-8b",
+                stream: false, // For absolute fastest <1s simple response, disable stream or handle efficiently. Let's use simple JSON for speed unless streaming is vital for UI. The user asked for <1s response time.
+                // Actually, duplicate `callBytez` logic uses streaming. Let's stick to simple text for Flash Speed if that's the goal, or stream if possible. The UI expects stream or text.
+                // Let's use non-streaming for "Instant" feel if the response is short, or stream. The previous implementation used stream.
+                // Let's go with non-streaming for simplicity and speed of *connection* (less overhead). 
+                max_tokens: 300,
+                temperature: 0.2,
+                messages: finalMessages,
+            }),
+        });
+
+        if (!response.ok) {
+            throw new Error(`Cerebras API Error: ${response.status}`);
+        }
+
+        const data = await response.json();
+        const text = data.choices?.[0]?.message?.content || "";
+
+        return {
+            detailed_answer: text,
+            direct_answer: text.slice(0, 150) + "..."
+        };
+
+    } catch (e) {
+        console.error("[Flash Mode] Cerebras Call Failed:", e);
+        return null;
+    }
+}
+
+
 // --- API Handlers ---
 
 export async function GET(request: NextRequest) {
@@ -604,21 +750,25 @@ export async function GET(request: NextRequest) {
     }
 
     try {
-        // 1. Try Bytez
+        // 1. Try Bytez (which handles Puter/Gemini/DeepSeek)
         const result = await callBytez(query, mode, undefined, quality, lang);
         return NextResponse.json(result);
-    } catch (e) {
-        console.warn("Bytez Primary Failed, attempting Fallback...", e);
-        try {
-            // 2. Fallback to OpenRouter (General Chat)
-            const fallbackResult = await callOpenRouter(query, undefined, PeakModel.FLASH, lang);
-            return NextResponse.json(fallbackResult);
-        } catch (fallbackError: any) {
-            console.error("OpenRouter Fallback Failed:", fallbackError);
-            return NextResponse.json({
-                detailed_answer: `Error: Both providers failed. Bytez: ${e instanceof Error ? e.message : String(e)}. OpenRouter: ${fallbackError.message}`,
-            });
+    } catch (error: any) {
+        // Global Error Handler for Route
+        console.error("Global Request Failed:", error);
+        await logErrorToSupabase(error, "Global Route Handler");
+
+        const msg = error instanceof Error ? error.message : String(error);
+        let userMessage = msg;
+
+        // Mask technical credit errors with friendly message
+        if (msg.includes("401") || msg.includes("402") || msg.includes("429") || msg.includes("insufficient_quota") || msg.includes("billing") || msg.includes("credit") || msg.includes("key")) {
+            userMessage = "Our AI models are resting right now. Please come back tomorrow or try a different mode! 🚀";
         }
+
+        return NextResponse.json({
+            detailed_answer: `Error: ${userMessage}`,
+        });
     }
 }
 
@@ -641,6 +791,8 @@ export async function POST(request: NextRequest) {
                 mode = detectedMode;
             }
         }
+
+
 
         if (!messages || !Array.isArray(messages)) {
             return NextResponse.json(
@@ -667,10 +819,20 @@ export async function POST(request: NextRequest) {
             }
         }
 
-    } catch (error) {
+    } catch (error: any) {
         console.error("Request Failed:", error);
+        await logErrorToSupabase(error, "POST Request Handler");
+
+        const msg = error instanceof Error ? error.message : String(error);
+        let userMessage = msg;
+
+        // Mask technical credit errors with friendly message
+        if (msg.includes("401") || msg.includes("402") || msg.includes("429") || msg.includes("insufficient_quota") || msg.includes("billing") || msg.includes("credit") || msg.includes("key")) {
+            userMessage = "Our AI models are resting right now. Please come back tomorrow or try a different mode! 🚀";
+        }
+
         return NextResponse.json({
-            detailed_answer: `Error: ${error instanceof Error ? error.message : String(error)}`,
+            detailed_answer: `Error: ${userMessage}`,
         });
     }
 }

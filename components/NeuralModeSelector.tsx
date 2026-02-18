@@ -120,7 +120,7 @@ export default function NeuralModeSelector() {
                                 className={`
                                 relative flex items-center justify-center gap-3 px-4 py-3 md:py-2 rounded-xl
                                 text-sm md:text-xs font-medium cursor-pointer w-full md:w-auto flex-1
-                                min-h-[48px] md:min-h-[auto]
+                                min-h-[44px] md:min-h-0
                                 transition-colors duration-200
                                 ${isSelected
                                         ? "text-white"

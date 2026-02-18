@@ -510,25 +510,31 @@ function SearchResultsContent() {
                     firstChunkReceived = true;
                 }
 
-                // Stream parsing
-                const directMatch = accumulated.match(/"direct_answer":\s*"([\s\S]*?)(?:"|$)/);
-                const detailedMatch = accumulated.match(/"detailed_answer":\s*"([\s\S]*?)(?:"|$)/);
-                const clean = (s: string) => s.replace(/\\n/g, "\n").replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+                // Check if response is likely JSON (starts with {)
+                const isJson = accumulated.trim().startsWith("{");
 
-                let hasUpdate = false;
-                if (directMatch && directMatch[1]) {
-                    setDirectAnswer(clean(directMatch[1]));
-                    hasUpdate = true;
-                }
-                if (detailedMatch && detailedMatch[1]) {
-                    const val = clean(detailedMatch[1]);
-                    setDetailedAnswer(val);
-                    setAnswer(val); // Keep answer in sync
-                    hasUpdate = true;
+                if (!isJson) {
+                    // Raw Text Stream (Flash Mode)
+                    setAnswer(accumulated);
+                    setDetailedAnswer(accumulated);
+                } else {
+                    // JSON Stream parsing
+                    const directMatch = accumulated.match(/"direct_answer":\s*"([\s\S]*?)(?:"|$)/);
+                    const detailedMatch = accumulated.match(/"detailed_answer":\s*"([\s\S]*?)(?:"|$)/);
+                    const clean = (s: string) => s.replace(/\\n/g, "\n").replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+
+                    if (directMatch && directMatch[1]) {
+                        setDirectAnswer(clean(directMatch[1]));
+                    }
+                    if (detailedMatch && detailedMatch[1]) {
+                        const val = clean(detailedMatch[1]);
+                        setDetailedAnswer(val);
+                        setAnswer(val); // Keep answer in sync
+                    }
                 }
 
                 // If we have any content update, allow streaming UI
-                if (hasUpdate || accumulated.length > 10) {
+                if (accumulated.length > 5) {
                     // Ensure loading is off if we are processing data (safety)
                     if (isLoading) setIsLoading(false);
                 }
@@ -675,7 +681,7 @@ function SearchResultsContent() {
             <SettingsDrawer isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} />
 
             <motion.main
-                className="relative z-10 min-h-screen flex flex-col items-center px-4 py-8 sm:py-12"
+                className="relative z-10 min-h-screen flex flex-col items-center px-4 py-8 sm:py-12 overflow-x-hidden"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 transition={{ duration: 0.8, ease: "easeOut" }}
@@ -701,6 +707,7 @@ function SearchResultsContent() {
                     <button onClick={() => router.push("/")} className="flex items-center gap-2 cursor-pointer ml-auto">
                         <Image
                             src="/icon.png" alt="Peak AI" width={28} height={28}
+                            priority
                             style={{ filter: "drop-shadow(0 0 20px rgba(168, 85, 247, 1))", mixBlendMode: "plus-lighter" as const }}
                             onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
                         />

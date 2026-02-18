@@ -7,9 +7,10 @@
 export enum PeakModel {
     CODE = "openai/gpt-5.2-codex",
     PRO = "anthropic/claude-4.6-opus",
-    FLASH = "openai/gpt-5.2-pro",
+    FLASH = "google/gemini-2.0-flash:free",
+    THINK = "deepseek/deepseek-r1:free",
     CREATIVE = "openai/gpt-5.2-pro",
-    DEFAULT = "openai/gpt-5.2-pro"
+    DEFAULT = "google/gemini-2.0-flash:free"
 }
 
 export interface LLMConfig {
@@ -27,19 +28,16 @@ export async function callOpenRouter(
     config: LLMConfig = {}
 ) {
     // 1. Dynamic Authentication
-    let apiKey: string | undefined;
+    let apiKey = process.env.OPENROUTER_API_KEY;
 
-    if (model.startsWith("openai/")) {
+    // Prefer specific keys if available and matching provider
+    if (model.startsWith("openai/") && process.env.OPENROUTER_KEY_OPENAI) {
         apiKey = process.env.OPENROUTER_KEY_OPENAI;
-    } else if (model.startsWith("anthropic/")) {
+    } else if (model.startsWith("anthropic/") && process.env.OPENROUTER_KEY_ANTHROPIC) {
         apiKey = process.env.OPENROUTER_KEY_ANTHROPIC;
     }
 
-    // Fallback for other providers or unmapped models if needed, but per request we strictly use these two.
-    // If the user adds other models later, they will need to add mappings here.
-
     if (!apiKey) {
-        console.error(`[LLM Service] Error: No specific API Key configured for model prefix: ${model}`);
         throw new Error("Missing OpenRouter Key for model: " + model);
     }
 
@@ -49,7 +47,6 @@ export async function callOpenRouter(
 
     // Inject System Prompt for Language
     // STRICT REQUIREMENT: Default to English.
-    // Strict Language Requirement
     const systemPrompt = `You are Peak AI. Respond ONLY in English. Only answer in another language if the user explicitly requests it.`;
 
     // Prepend system prompt if not present
@@ -59,18 +56,16 @@ export async function callOpenRouter(
 
     // 3. Request Configuration
     const controller = new AbortController();
-    const timeoutSeconds = model.includes("codex") || model.includes("opus") ? 90 : 60; // Longer timeout for reasoning models
+    const timeoutSeconds = model.includes("codex") || model.includes("opus") || model.includes("think") ? 90 : 60;
     const timeoutId = setTimeout(() => controller.abort(), timeoutSeconds * 1000);
 
     try {
         const body: any = {
             model: model,
             messages: payloadMessages,
-            max_tokens: config.maxTokens || 200, // Reduced default to 200 to prevent credit issues
-            ...config // Inject effort, thinking, etc.
+            max_tokens: config.maxTokens || 1000,
+            ...config
         };
-
-        console.log(`[LLM Service] Requesting ${model} with timeout ${timeoutSeconds}s...`);
 
         const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
             method: "POST",
@@ -89,7 +84,7 @@ export async function callOpenRouter(
 
             // Handle Credit Limit / Quota Errors (402 Payment Required or related)
             if (response.status === 402 || errorText.toLowerCase().includes("credit") || errorText.toLowerCase().includes("quota") || errorText.toLowerCase().includes("insufficient")) {
-                throw new Error("I am resting for a moment. Please try again in a few minutes or switch to a different mode.");
+                throw new Error("Our AI models are resting right now. Please come back tomorrow or try a different mode! 🚀");
             }
 
             throw new Error(`OpenRouter API error ${response.status}: ${errorText}`);
