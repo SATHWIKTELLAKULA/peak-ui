@@ -22,10 +22,13 @@ import SettingsDrawer from "@/components/SettingsDrawer";
 import EntitiesSidebar from "@/components/EntitiesSidebar";
 import DeepDiveToolbar from "@/components/DeepDiveToolbar";
 import SkeletonLoader from "@/components/SkeletonLoader";
+import { supabaseBrowser } from "@/lib/supabaseClient";
 import { useSettings } from "@/contexts/SettingsContext";
 import type { NeuralMode } from "@/contexts/SettingsContext";
 import ResponseToggle from "@/components/ResponseToggle";
 import NeuralCore from "@/components/NeuralCore";
+import LockedModeCard from "@/components/LockedModeCard";
+import { useAuth } from "@/hooks/useAuth";
 
 /** Session cache key prefix */
 const CACHE_PREFIX = "peak_search_";
@@ -136,6 +139,18 @@ function SearchResultsContent() {
             }
         });
     }, [query]);
+
+    const { isLoggedIn, loading: authLoading } = useAuth();
+    const [isLocked, setIsLocked] = useState(false);
+
+    // Auth Check for Premium Modes
+    useEffect(() => {
+        if (!authLoading && !isLoggedIn && neuralMode !== "flash") {
+            setIsLocked(true);
+        } else {
+            setIsLocked(false);
+        }
+    }, [isLoggedIn, authLoading, neuralMode]);
 
     const [answer, setAnswer] = useState("");
     // Initialize loading to true if there's a query in the URL to prevent "No query" flicker
@@ -411,8 +426,16 @@ function SearchResultsContent() {
 
     /* ── Initial search fetch ── */
     const fetchAnswer = async (q: string) => {
-        if (!q.trim()) {
-            return;
+        if (!q.trim()) return;
+
+        // Gate check
+        if (neuralMode !== "flash") {
+            const { data: { session } } = await supabaseBrowser.auth.getSession();
+            if (!session?.user) {
+                setIsLocked(true);
+                setIsLoading(false);
+                return;
+            }
         }
 
         // Start Data Hum
@@ -566,11 +589,18 @@ function SearchResultsContent() {
             } catch { /* */ }
             incrementSearchCount();
 
-            fetch("/api/history", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ query: q.trim(), answer: accumulated }),
-            }).catch(() => { });
+            if (supabaseBrowser) {
+                // Ensure authenticated before trying to save history
+                const { data: { session } } = await supabaseBrowser.auth.getSession();
+                if (session?.user) {
+                    supabaseBrowser
+                        .from("search_history")
+                        .insert({ query: q.trim(), answer: accumulated, user_id: session.user.id })
+                        .then(({ error }) => {
+                            if (error) console.warn("Failed to save history:", error.message);
+                        });
+                }
+            }
         } catch (err: unknown) {
             if (err instanceof Error && err.name === "AbortError") return;
             setError(err instanceof Error ? err.message : "Neural Connection Interrupted.");
@@ -740,244 +770,251 @@ function SearchResultsContent() {
                     </div>
                 </motion.div>
 
-                {/* ===== Query Display ===== */}
-                <motion.div className="w-full max-w-5xl mb-8" custom={1} variants={materialize} initial="hidden" animate="visible">
-                    <div className="flex items-center gap-3 px-5 py-3 rounded-2xl bg-[rgba(255,255,255,0.025)] border border-[rgba(255,255,255,0.05)] backdrop-blur-xl">
-                        <Search className="w-4 h-4 text-[rgba(238,238,255,0.2)] flex-shrink-0" />
-                        <span className="text-[#eeeeff] text-base font-light truncate">{query}</span>
-                        <Sparkles className="w-4 h-4 text-[#8b5cf6] opacity-60 flex-shrink-0 ml-auto" />
+                {/* ===== Locked or Main Content ===== */}
+                {isLocked ? (
+                    <div className="w-full flex-1 flex flex-col items-center justify-center mt-20 relative z-20">
+                        <LockedModeCard />
                     </div>
-                </motion.div>
+                ) : (
+                    <>
+                        {/* ===== Query Display ===== */}
+                        <motion.div className="w-full max-w-5xl mb-8" custom={1} variants={materialize} initial="hidden" animate="visible">
+                            <div className="flex items-center gap-3 px-5 py-3 rounded-2xl bg-[rgba(255,255,255,0.025)] border border-[rgba(255,255,255,0.05)] backdrop-blur-xl">
+                                <Search className="w-4 h-4 text-[rgba(238,238,255,0.2)] flex-shrink-0" />
+                                <span className="text-[#eeeeff] text-base font-light truncate">{query}</span>
+                                <Sparkles className="w-4 h-4 text-[#8b5cf6] opacity-60 flex-shrink-0 ml-auto" />
+                            </div>
+                        </motion.div>
 
-                {/* ===== Main Content Area (Answer + Sidebar) ===== */}
-                <motion.div
-                    className="w-full max-w-5xl flex flex-col lg:flex-row gap-6"
-                    custom={2} variants={materialize} initial="hidden" animate="visible"
-                >
-                    {/* Main Answer Column */}
-                    <div className="flex-1 min-w-0">
+                        {/* ===== Main Content Area (Answer + Sidebar) ===== */}
                         <motion.div
-                            layout // Fluid layout animation
-                            className={`relative glass-strong p-8 sm:p-10 rounded-3xl overflow-hidden min-h-[200px] transition-all duration-500 ${error ? "border border-red-500/30 shadow-[0_0_40px_rgba(239,68,68,0.15)] bg-[rgba(239,68,68,0.02)]" : ""}`}
-                            variants={containerVariants}
-                            initial="hidden"
-                            animate="visible"
+                            className="w-full max-w-5xl flex flex-col lg:flex-row gap-6"
+                            custom={2} variants={materialize} initial="hidden" animate="visible"
                         >
-                            {/* Decorative glows */}
-                            <div className="absolute -top-20 -right-20 w-40 h-40 rounded-full bg-[rgba(139,92,246,0.08)] blur-3xl pointer-events-none" />
-                            <div className="absolute -bottom-20 -left-20 w-40 h-40 rounded-full bg-[rgba(79,143,255,0.06)] blur-3xl pointer-events-none" />
+                            {/* Main Answer Column */}
+                            <div className="flex-1 min-w-0">
+                                <motion.div
+                                    layout // Fluid layout animation
+                                    className={`relative glass-strong p-8 sm:p-10 rounded-3xl overflow-hidden min-h-[200px] transition-all duration-500 ${error ? "border border-red-500/30 shadow-[0_0_40px_rgba(239,68,68,0.15)] bg-[rgba(239,68,68,0.02)]" : ""}`}
+                                    variants={containerVariants}
+                                    initial="hidden"
+                                    animate="visible"
+                                >
+                                    {/* Decorative glows */}
+                                    <div className="absolute -top-20 -right-20 w-40 h-40 rounded-full bg-[rgba(139,92,246,0.08)] blur-3xl pointer-events-none" />
+                                    <div className="absolute -bottom-20 -left-20 w-40 h-40 rounded-full bg-[rgba(79,143,255,0.06)] blur-3xl pointer-events-none" />
 
-                            {/* Header */}
-                            <motion.div layout className="flex items-center gap-2 mb-6 relative z-10">
-                                <div className={`w-8 h-8 rounded-xl bg-gradient-to-br from-[#4f8fff] to-[#8b5cf6] flex items-center justify-center shadow-lg transition-shadow duration-300 ${isSpeaking ? "shadow-[0_0_20px_rgba(139,92,246,0.5)] animate-pulse" : "shadow-[rgba(139,92,246,0.2)]"}`}>
-                                    <Sparkles className="w-4 h-4 text-white" />
-                                </div>
-                                <h2 className="text-sm font-semibold text-[rgba(238,238,255,0.5)] tracking-wide uppercase">AI Answer</h2>
-
-                                {/* Action buttons */}
-                                {answer && !isLoading && (
-                                    <div className="flex items-center gap-1 ml-2">
-                                        <motion.button onClick={toggleSpeech}
-                                            className={`p-1.5 rounded-lg cursor-pointer transition-all duration-300 ${isSpeaking ? "bg-[rgba(139,92,246,0.15)] text-[#a855f7]" : "bg-[rgba(255,255,255,0.03)] text-[rgba(238,238,255,0.3)] hover:text-[#a855f7]"}`}
-                                            whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
-                                            title={isSpeaking ? "Stop reading" : "Read aloud"}>
-                                            {isSpeaking ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
-                                        </motion.button>
-                                        <motion.button onClick={togglePin}
-                                            className={`p-1.5 rounded-lg cursor-pointer transition-all duration-300 ${isPinned ? "bg-[rgba(168,85,247,0.15)] text-[#a855f7]" : "bg-[rgba(255,255,255,0.03)] text-[rgba(238,238,255,0.3)] hover:text-[#a855f7]"}`}
-                                            whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
-                                            title={isPinned ? "Unpin" : "Pin answer"}>
-                                            {isPinned ? <PinOff className="w-4 h-4" /> : <Pin className="w-4 h-4" />}
-                                        </motion.button>
-                                    </div>
-                                )}
-
-                                {isStreaming && (
-                                    <span className="ml-auto flex items-center gap-1.5 text-xs text-[rgba(238,238,255,0.25)]">
-                                        <span className="w-1.5 h-1.5 rounded-full bg-[#8b5cf6] animate-pulse" />
-                                        Streaming
-                                    </span>
-                                )}
-                            </motion.div>
-
-                            {/* Director Mode Progress Bar */}
-                            <AnimatePresence>
-                                {neuralMode === "creative" && creativeSubMode === "director" && progress > 0 && (
-                                    <motion.div
-                                        initial={{ opacity: 0, height: 0, marginBottom: 0 }}
-                                        animate={{ opacity: 1, height: "auto", marginBottom: 32 }}
-                                        exit={{ opacity: 0, height: 0, marginBottom: 0 }}
-                                        className="w-full max-w-xl mx-auto overflow-hidden"
-                                    >
-                                        <div className="flex justify-between text-[10px] uppercase tracking-widest text-[#a855f7] mb-2 font-semibold">
-                                            <span>Rendering Cinema</span>
-                                            <span>{Math.round(progress)}%</span>
+                                    {/* Header */}
+                                    <motion.div layout className="flex items-center gap-2 mb-6 relative z-10">
+                                        <div className={`w-8 h-8 rounded-xl bg-gradient-to-br from-[#4f8fff] to-[#8b5cf6] flex items-center justify-center shadow-lg transition-shadow duration-300 ${isSpeaking ? "shadow-[0_0_20px_rgba(139,92,246,0.5)] animate-pulse" : "shadow-[rgba(139,92,246,0.2)]"}`}>
+                                            <Sparkles className="w-4 h-4 text-white" />
                                         </div>
-                                        <div className="h-1 w-full bg-[#a855f7]/10 rounded-full overflow-hidden border border-[#a855f7]/20 relative">
-                                            <motion.div
-                                                className="absolute top-0 left-0 h-full bg-[#a855f7] shadow-[0_0_15px_#a855f7]"
-                                                initial={{ width: 0 }}
-                                                animate={{ width: `${progress}%` }}
-                                                transition={{ ease: "linear" }}
-                                            />
-                                        </div>
-                                        <p className="text-center text-[10px] text-white/30 mt-2 font-mono">
-                                            Constructing neural scenes...
-                                        </p>
+                                        <h2 className="text-sm font-semibold text-[rgba(238,238,255,0.5)] tracking-wide uppercase">AI Answer</h2>
+
+                                        {/* Action buttons */}
+                                        {answer && !isLoading && (
+                                            <div className="flex items-center gap-1 ml-2">
+                                                <motion.button onClick={toggleSpeech}
+                                                    className={`p-1.5 rounded-lg cursor-pointer transition-all duration-300 ${isSpeaking ? "bg-[rgba(139,92,246,0.15)] text-[#a855f7]" : "bg-[rgba(255,255,255,0.03)] text-[rgba(238,238,255,0.3)] hover:text-[#a855f7]"}`}
+                                                    whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
+                                                    title={isSpeaking ? "Stop reading" : "Read aloud"}>
+                                                    {isSpeaking ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+                                                </motion.button>
+                                                <motion.button onClick={togglePin}
+                                                    className={`p-1.5 rounded-lg cursor-pointer transition-all duration-300 ${isPinned ? "bg-[rgba(168,85,247,0.15)] text-[#a855f7]" : "bg-[rgba(255,255,255,0.03)] text-[rgba(238,238,255,0.3)] hover:text-[#a855f7]"}`}
+                                                    whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
+                                                    title={isPinned ? "Unpin" : "Pin answer"}>
+                                                    {isPinned ? <PinOff className="w-4 h-4" /> : <Pin className="w-4 h-4" />}
+                                                </motion.button>
+                                            </div>
+                                        )}
+
+                                        {isStreaming && (
+                                            <span className="ml-auto flex items-center gap-1.5 text-xs text-[rgba(238,238,255,0.25)]">
+                                                <span className="w-1.5 h-1.5 rounded-full bg-[#8b5cf6] animate-pulse" />
+                                                Streaming
+                                            </span>
+                                        )}
                                     </motion.div>
-                                )}
-                            </AnimatePresence>
 
-                            {/* Content */}
-                            <div className="relative z-10 min-h-[100px]">
-                                <AnimatePresence mode="wait">
-                                    {isLoading && (
-                                        <motion.div key="loading" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="h-64 w-full flex items-center justify-center">
-                                            {/* Neural Pulse Loading State */}
-                                            <div className="scale-75 sm:scale-100">
-                                                <NeuralCore isTyping={true} />
-                                            </div>
-                                            <p className="absolute mt-32 text-xs uppercase tracking-[0.2em] text-[#a855f7] animate-pulse">Processing Data...</p>
-                                        </motion.div>
-                                    )}
+                                    {/* Director Mode Progress Bar */}
+                                    <AnimatePresence>
+                                        {neuralMode === "creative" && creativeSubMode === "director" && progress > 0 && (
+                                            <motion.div
+                                                initial={{ opacity: 0, height: 0, marginBottom: 0 }}
+                                                animate={{ opacity: 1, height: "auto", marginBottom: 32 }}
+                                                exit={{ opacity: 0, height: 0, marginBottom: 0 }}
+                                                className="w-full max-w-xl mx-auto overflow-hidden"
+                                            >
+                                                <div className="flex justify-between text-[10px] uppercase tracking-widest text-[#a855f7] mb-2 font-semibold">
+                                                    <span>Rendering Cinema</span>
+                                                    <span>{Math.round(progress)}%</span>
+                                                </div>
+                                                <div className="h-1 w-full bg-[#a855f7]/10 rounded-full overflow-hidden border border-[#a855f7]/20 relative">
+                                                    <motion.div
+                                                        className="absolute top-0 left-0 h-full bg-[#a855f7] shadow-[0_0_15px_#a855f7]"
+                                                        initial={{ width: 0 }}
+                                                        animate={{ width: `${progress}%` }}
+                                                        transition={{ ease: "linear" }}
+                                                    />
+                                                </div>
+                                                <p className="text-center text-[10px] text-white/30 mt-2 font-mono">
+                                                    Constructing neural scenes...
+                                                </p>
+                                            </motion.div>
+                                        )}
+                                    </AnimatePresence>
 
-                                    {error && !isLoading && (
-                                        <motion.div key="error" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
-                                            className="flex flex-col items-center justify-center py-12 gap-6 relative z-20">
-                                            <div className="w-16 h-16 rounded-full bg-[rgba(239,68,68,0.1)] flex items-center justify-center border border-red-500/20 shadow-[0_0_30px_rgba(239,68,68,0.15)]">
-                                                <AlertCircle className="w-8 h-8 text-red-400" />
-                                            </div>
-                                            <div className="text-center max-w-sm">
-                                                <h3 className="text-lg font-semibold text-[#eeeeff] mb-2 tracking-wide font-orbitron">Neural Connection Interrupted</h3>
-                                                <p className="text-sm text-red-300/80 leading-relaxed">{error}</p>
-                                            </div>
-                                            <button onClick={handleManualRetry}
-                                                className="group flex items-center gap-2 px-6 py-2.5 rounded-full
+                                    {/* Content */}
+                                    <div className="relative z-10 min-h-[100px]">
+                                        <AnimatePresence mode="wait">
+                                            {isLoading && (
+                                                <motion.div key="loading" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="h-64 w-full flex items-center justify-center">
+                                                    {/* Neural Pulse Loading State */}
+                                                    <div className="scale-75 sm:scale-100">
+                                                        <NeuralCore isTyping={true} />
+                                                    </div>
+                                                    <p className="absolute mt-32 text-xs uppercase tracking-[0.2em] text-[#a855f7] animate-pulse">Processing Data...</p>
+                                                </motion.div>
+                                            )}
+
+                                            {error && !isLoading && (
+                                                <motion.div key="error" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+                                                    className="flex flex-col items-center justify-center py-12 gap-6 relative z-20">
+                                                    <div className="w-16 h-16 rounded-full bg-[rgba(239,68,68,0.1)] flex items-center justify-center border border-red-500/20 shadow-[0_0_30px_rgba(239,68,68,0.15)]">
+                                                        <AlertCircle className="w-8 h-8 text-red-400" />
+                                                    </div>
+                                                    <div className="text-center max-w-sm">
+                                                        <h3 className="text-lg font-semibold text-[#eeeeff] mb-2 tracking-wide font-orbitron">Neural Connection Interrupted</h3>
+                                                        <p className="text-sm text-red-300/80 leading-relaxed">{error}</p>
+                                                    </div>
+                                                    <button onClick={handleManualRetry}
+                                                        className="group flex items-center gap-2 px-6 py-2.5 rounded-full
                                                     bg-[rgba(239,68,68,0.1)] border border-red-500/30
                                                     text-red-300 hover:text-white hover:bg-red-500/20 hover:border-red-500/50
                                                     transition-all duration-300 text-sm cursor-pointer shadow-lg shadow-red-900/10">
-                                                <RefreshCw className="w-4 h-4 group-hover:rotate-180 transition-transform duration-500" />
-                                                <span>Re-establish Uplink</span>
-                                            </button>
-                                        </motion.div>
-                                    )}
+                                                        <RefreshCw className="w-4 h-4 group-hover:rotate-180 transition-transform duration-500" />
+                                                        <span>Re-establish Uplink</span>
+                                                    </button>
+                                                </motion.div>
+                                            )}
 
-                                    {showContent && (
-                                        <motion.div key="answer-container"
-                                            layout
-                                            initial={{ opacity: 0, y: 20 }}
-                                            animate={{ opacity: 1, y: 0 }}
-                                            transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
-                                            className="w-full"
-                                        >
-                                            {/* Toggle Switcher & Actions */}
-                                            <div className="mb-6 flex justify-center items-center gap-4">
-                                                <ResponseToggle viewData={viewMode} onChange={setViewMode} />
+                                            {showContent && (
+                                                <motion.div key="answer-container"
+                                                    layout
+                                                    initial={{ opacity: 0, y: 20 }}
+                                                    animate={{ opacity: 1, y: 0 }}
+                                                    transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
+                                                    className="w-full"
+                                                >
+                                                    {/* Toggle Switcher & Actions */}
+                                                    <div className="mb-6 flex justify-center items-center gap-4">
+                                                        <ResponseToggle viewData={viewMode} onChange={setViewMode} />
 
-                                                {/* Download Button for Media */}
-                                                {(answer.startsWith("IMAGE_DATA:") || answer.startsWith("VIDEO_DATA:")) && isMediaLoaded && (
-                                                    <motion.button
-                                                        initial={{ opacity: 0, scale: 0.8 }}
-                                                        animate={{ opacity: 1, scale: 1 }}
-                                                        whileHover={{ scale: 1.05 }}
-                                                        whileTap={{ scale: 0.95 }}
-                                                        onClick={() => {
-                                                            const isVideo = answer.startsWith("VIDEO_DATA:");
-                                                            const url = answer.replace(isVideo ? "VIDEO_DATA:" : "IMAGE_DATA:", "");
-                                                            const ext = isVideo ? "mp4" : "png";
-                                                            handleDownload(url, `peak-ai-gen.${ext}`);
-                                                        }}
-                                                        className="p-2 rounded-full bg-white/10 hover:bg-white/20 border border-white/10 transition-colors"
-                                                        title="Save Media"
-                                                    >
-                                                        <Save className="w-4 h-4 text-[#eeeeff]" />
-                                                    </motion.button>
-                                                )}
-                                            </div>
-
-                                            {/* Sliding Content */}
-                                            <AnimatePresence mode="wait">
-                                                {answer.startsWith("IMAGE_DATA:") ? (
-                                                    <div className="flex justify-center w-full relative min-h-[300px]">
-                                                        {/* Shimmer / Skeleton Loader */}
-                                                        <AnimatePresence>
-                                                            {!isMediaLoaded && (
-                                                                <motion.div
-                                                                    key="img-skeleton"
-                                                                    initial={{ opacity: 0 }}
-                                                                    animate={{ opacity: 1 }}
-                                                                    exit={{ opacity: 0 }}
-                                                                    className="absolute inset-0 w-full max-w-2xl mx-auto rounded-xl overflow-hidden bg-[rgba(255,255,255,0.05)] border border-white/10"
-                                                                >
-                                                                    <div className="absolute inset-0 -translate-x-full animate-[shimmer_1.5s_infinite] bg-gradient-to-r from-transparent via-white/10 to-transparent" />
-                                                                    <div className="absolute inset-0 flex items-center justify-center">
-                                                                        <Loader2 className="w-8 h-8 text-[#8b5cf6] animate-spin opacity-50" />
-                                                                    </div>
-                                                                </motion.div>
-                                                            )}
-                                                        </AnimatePresence>
-
-                                                        {/* Image */}
-                                                        <motion.img
-                                                            src={answer.replace("IMAGE_DATA:", "")}
-                                                            alt="Generated Visualization"
-                                                            onLoad={() => setIsMediaLoaded(true)}
-                                                            initial={{ opacity: 0, scale: 0.95 }}
-                                                            animate={{
-                                                                opacity: isMediaLoaded ? 1 : 0,
-                                                                scale: isMediaLoaded ? 1 : 0.95
-                                                            }}
-                                                            transition={{ duration: 0.5, ease: "easeOut" }}
-                                                            className="rounded-xl shadow-2xl border border-white/10 w-full max-w-2xl object-cover relative z-10"
-                                                        />
+                                                        {/* Download Button for Media */}
+                                                        {(answer.startsWith("IMAGE_DATA:") || answer.startsWith("VIDEO_DATA:")) && isMediaLoaded && (
+                                                            <motion.button
+                                                                initial={{ opacity: 0, scale: 0.8 }}
+                                                                animate={{ opacity: 1, scale: 1 }}
+                                                                whileHover={{ scale: 1.05 }}
+                                                                whileTap={{ scale: 0.95 }}
+                                                                onClick={() => {
+                                                                    const isVideo = answer.startsWith("VIDEO_DATA:");
+                                                                    const url = answer.replace(isVideo ? "VIDEO_DATA:" : "IMAGE_DATA:", "");
+                                                                    const ext = isVideo ? "mp4" : "png";
+                                                                    handleDownload(url, `peak-ai-gen.${ext}`);
+                                                                }}
+                                                                className="p-2 rounded-full bg-white/10 hover:bg-white/20 border border-white/10 transition-colors"
+                                                                title="Save Media"
+                                                            >
+                                                                <Save className="w-4 h-4 text-[#eeeeff]" />
+                                                            </motion.button>
+                                                        )}
                                                     </div>
-                                                ) : answer.startsWith("VIDEO_DATA:") ? (
-                                                    <div className="flex justify-center w-full relative min-h-[300px]">
-                                                        {/* Video Shimmer */}
-                                                        <AnimatePresence>
-                                                            {!isMediaLoaded && (
-                                                                <motion.div
-                                                                    key="vid-skeleton"
-                                                                    initial={{ opacity: 0 }}
-                                                                    animate={{ opacity: 1 }}
-                                                                    exit={{ opacity: 0 }}
-                                                                    className="absolute inset-0 w-full max-w-2xl mx-auto rounded-xl overflow-hidden bg-[rgba(255,255,255,0.05)] border border-white/10"
-                                                                >
-                                                                    <div className="absolute inset-0 -translate-x-full animate-[shimmer_1.5s_infinite] bg-gradient-to-r from-transparent via-white/10 to-transparent" />
-                                                                    <div className="absolute inset-0 flex items-center justify-center flex-col gap-2">
-                                                                        <Loader2 className="w-8 h-8 text-[#8b5cf6] animate-spin opacity-50" />
-                                                                        <span className="text-xs text-[#8b5cf6]/50 tracking-widest uppercase">Rendering Scene...</span>
-                                                                    </div>
-                                                                </motion.div>
-                                                            )}
-                                                        </AnimatePresence>
 
-                                                        {/* Video */}
-                                                        <motion.video
-                                                            src={answer.replace("VIDEO_DATA:", "")}
-                                                            controls
-                                                            autoPlay
-                                                            loop
-                                                            muted
-                                                            onLoadedData={() => setIsMediaLoaded(true)}
-                                                            onCanPlayThrough={() => setIsMediaLoaded(true)}
-                                                            initial={{ opacity: 0, scale: 0.95 }}
-                                                            animate={{
-                                                                opacity: isMediaLoaded ? 1 : 0,
-                                                                scale: isMediaLoaded ? 1 : 0.95
-                                                            }}
-                                                            transition={{ duration: 0.5, ease: "easeOut" }}
-                                                            className="rounded-xl shadow-2xl border border-white/10 w-full max-w-2xl object-cover relative z-10"
-                                                        />
-                                                    </div>
-                                                ) : (
-                                                    <motion.div
-                                                        key={viewMode}
-                                                        variants={containerVariants}
-                                                        initial="hidden"
-                                                        animate="visible"
-                                                        exit={{ opacity: 0, filter: "blur(5px)", transition: { duration: 0.2 } }}
-                                                        className="prose prose-invert prose-sm max-w-none
+                                                    {/* Sliding Content */}
+                                                    <AnimatePresence mode="wait">
+                                                        {answer.startsWith("IMAGE_DATA:") ? (
+                                                            <div className="flex justify-center w-full relative min-h-[300px]">
+                                                                {/* Shimmer / Skeleton Loader */}
+                                                                <AnimatePresence>
+                                                                    {!isMediaLoaded && (
+                                                                        <motion.div
+                                                                            key="img-skeleton"
+                                                                            initial={{ opacity: 0 }}
+                                                                            animate={{ opacity: 1 }}
+                                                                            exit={{ opacity: 0 }}
+                                                                            className="absolute inset-0 w-full max-w-2xl mx-auto rounded-xl overflow-hidden bg-[rgba(255,255,255,0.05)] border border-white/10"
+                                                                        >
+                                                                            <div className="absolute inset-0 -translate-x-full animate-[shimmer_1.5s_infinite] bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+                                                                            <div className="absolute inset-0 flex items-center justify-center">
+                                                                                <Loader2 className="w-8 h-8 text-[#8b5cf6] animate-spin opacity-50" />
+                                                                            </div>
+                                                                        </motion.div>
+                                                                    )}
+                                                                </AnimatePresence>
+
+                                                                {/* Image */}
+                                                                <motion.img
+                                                                    src={answer.replace("IMAGE_DATA:", "")}
+                                                                    alt="Generated Visualization"
+                                                                    onLoad={() => setIsMediaLoaded(true)}
+                                                                    initial={{ opacity: 0, scale: 0.95 }}
+                                                                    animate={{
+                                                                        opacity: isMediaLoaded ? 1 : 0,
+                                                                        scale: isMediaLoaded ? 1 : 0.95
+                                                                    }}
+                                                                    transition={{ duration: 0.5, ease: "easeOut" }}
+                                                                    className="rounded-xl shadow-2xl border border-white/10 w-full max-w-2xl object-cover relative z-10"
+                                                                />
+                                                            </div>
+                                                        ) : answer.startsWith("VIDEO_DATA:") ? (
+                                                            <div className="flex justify-center w-full relative min-h-[300px]">
+                                                                {/* Video Shimmer */}
+                                                                <AnimatePresence>
+                                                                    {!isMediaLoaded && (
+                                                                        <motion.div
+                                                                            key="vid-skeleton"
+                                                                            initial={{ opacity: 0 }}
+                                                                            animate={{ opacity: 1 }}
+                                                                            exit={{ opacity: 0 }}
+                                                                            className="absolute inset-0 w-full max-w-2xl mx-auto rounded-xl overflow-hidden bg-[rgba(255,255,255,0.05)] border border-white/10"
+                                                                        >
+                                                                            <div className="absolute inset-0 -translate-x-full animate-[shimmer_1.5s_infinite] bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+                                                                            <div className="absolute inset-0 flex items-center justify-center flex-col gap-2">
+                                                                                <Loader2 className="w-8 h-8 text-[#8b5cf6] animate-spin opacity-50" />
+                                                                                <span className="text-xs text-[#8b5cf6]/50 tracking-widest uppercase">Rendering Scene...</span>
+                                                                            </div>
+                                                                        </motion.div>
+                                                                    )}
+                                                                </AnimatePresence>
+
+                                                                {/* Video */}
+                                                                <motion.video
+                                                                    src={answer.replace("VIDEO_DATA:", "")}
+                                                                    controls
+                                                                    autoPlay
+                                                                    loop
+                                                                    muted
+                                                                    onLoadedData={() => setIsMediaLoaded(true)}
+                                                                    onCanPlayThrough={() => setIsMediaLoaded(true)}
+                                                                    initial={{ opacity: 0, scale: 0.95 }}
+                                                                    animate={{
+                                                                        opacity: isMediaLoaded ? 1 : 0,
+                                                                        scale: isMediaLoaded ? 1 : 0.95
+                                                                    }}
+                                                                    transition={{ duration: 0.5, ease: "easeOut" }}
+                                                                    className="rounded-xl shadow-2xl border border-white/10 w-full max-w-2xl object-cover relative z-10"
+                                                                />
+                                                            </div>
+                                                        ) : (
+                                                            <motion.div
+                                                                key={viewMode}
+                                                                variants={containerVariants}
+                                                                initial="hidden"
+                                                                animate="visible"
+                                                                exit={{ opacity: 0, filter: "blur(5px)", transition: { duration: 0.2 } }}
+                                                                className="prose prose-invert prose-sm max-w-none
                                                             prose-headings:text-[#eeeeff] prose-headings:font-semibold
                                                             prose-p:text-[rgba(238,238,255,0.65)] prose-p:leading-relaxed
                                                             prose-strong:text-[#eeeeff]
@@ -986,208 +1023,211 @@ function SearchResultsContent() {
                                                             prose-li:marker:text-[#8b5cf6]
                                                             prose-code:text-[#8b5cf6] prose-code:bg-[rgba(139,92,246,0.1)] prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded-md prose-code:text-xs
                                                             prose-a:text-[#4f8fff] prose-a:no-underline hover:prose-a:underline"
-                                                    >
-                                                        <ReactMarkdown
-                                                            remarkPlugins={[remarkMath, remarkGfm]}
-                                                            rehypePlugins={[rehypeKatex]}
-                                                            components={{
-                                                                p: ({ children }) => (
-                                                                    <motion.p
-                                                                        initial="hidden"
-                                                                        whileInView="visible"
-                                                                        viewport={{ once: true, margin: "-10% 0px" }}
-                                                                        variants={scrollyVariants}
-                                                                    >
-                                                                        {children}
-                                                                    </motion.p>
-                                                                ),
-                                                                li: ({ children }) => (
-                                                                    <motion.li
-                                                                        initial="hidden"
-                                                                        whileInView="visible"
-                                                                        viewport={{ once: true, margin: "-10% 0px" }}
-                                                                        variants={scrollyVariants}
-                                                                    >
-                                                                        {children}
-                                                                    </motion.li>
-                                                                ),
-                                                                h1: ({ children }) => (
-                                                                    <motion.h1
-                                                                        initial="hidden"
-                                                                        whileInView="visible"
-                                                                        viewport={{ once: true, margin: "-10% 0px" }}
-                                                                        variants={scrollyVariants}
-                                                                    >
-                                                                        {children}
-                                                                    </motion.h1>
-                                                                ),
-                                                                h2: ({ children }) => (
-                                                                    <motion.h2
-                                                                        initial="hidden"
-                                                                        whileInView="visible"
-                                                                        viewport={{ once: true, margin: "-10% 0px" }}
-                                                                        variants={scrollyVariants}
-                                                                    >
-                                                                        {children}
-                                                                    </motion.h2>
-                                                                ),
-                                                                h3: ({ children }) => (
-                                                                    <motion.h3
-                                                                        initial="hidden"
-                                                                        whileInView="visible"
-                                                                        viewport={{ once: true, margin: "-10% 0px" }}
-                                                                        variants={scrollyVariants}
-                                                                    >
-                                                                        {children}
-                                                                    </motion.h3>
-                                                                ),
-                                                                code({ className, children, ...props }) {
-                                                                    const isBlock = className?.startsWith("language-") || String(children).includes("\n");
-                                                                    if (isBlock) {
-                                                                        return (
-                                                                            <motion.div
+                                                            >
+                                                                <ReactMarkdown
+                                                                    remarkPlugins={[remarkMath, remarkGfm]}
+                                                                    rehypePlugins={[rehypeKatex]}
+                                                                    components={{
+                                                                        p: ({ children }) => (
+                                                                            <motion.p
                                                                                 initial="hidden"
                                                                                 whileInView="visible"
                                                                                 viewport={{ once: true, margin: "-10% 0px" }}
                                                                                 variants={scrollyVariants}
                                                                             >
-                                                                                <CodeBlock className={className}>{String(children).replace(/\n$/, "")}</CodeBlock>
-                                                                            </motion.div>
-                                                                        );
-                                                                    }
-                                                                    return <code className={className} {...props}>{children}</code>;
-                                                                },
-                                                                a({ href, children }) {
-                                                                    return <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>;
-                                                                },
-                                                            }}
-                                                        >
-                                                            {viewMode === "detailed" ? detailedAnswer : (directAnswer || detailedAnswer)}
-                                                        </ReactMarkdown>
-                                                    </motion.div>
-                                                )}
-                                            </AnimatePresence>
-                                        </motion.div>
-                                    )}
-                                </AnimatePresence>
+                                                                                {children}
+                                                                            </motion.p>
+                                                                        ),
+                                                                        li: ({ children }) => (
+                                                                            <motion.li
+                                                                                initial="hidden"
+                                                                                whileInView="visible"
+                                                                                viewport={{ once: true, margin: "-10% 0px" }}
+                                                                                variants={scrollyVariants}
+                                                                            >
+                                                                                {children}
+                                                                            </motion.li>
+                                                                        ),
+                                                                        h1: ({ children }) => (
+                                                                            <motion.h1
+                                                                                initial="hidden"
+                                                                                whileInView="visible"
+                                                                                viewport={{ once: true, margin: "-10% 0px" }}
+                                                                                variants={scrollyVariants}
+                                                                            >
+                                                                                {children}
+                                                                            </motion.h1>
+                                                                        ),
+                                                                        h2: ({ children }) => (
+                                                                            <motion.h2
+                                                                                initial="hidden"
+                                                                                whileInView="visible"
+                                                                                viewport={{ once: true, margin: "-10% 0px" }}
+                                                                                variants={scrollyVariants}
+                                                                            >
+                                                                                {children}
+                                                                            </motion.h2>
+                                                                        ),
+                                                                        h3: ({ children }) => (
+                                                                            <motion.h3
+                                                                                initial="hidden"
+                                                                                whileInView="visible"
+                                                                                viewport={{ once: true, margin: "-10% 0px" }}
+                                                                                variants={scrollyVariants}
+                                                                            >
+                                                                                {children}
+                                                                            </motion.h3>
+                                                                        ),
+                                                                        code({ className, children, ...props }) {
+                                                                            const isBlock = className?.startsWith("language-") || String(children).includes("\n");
+                                                                            if (isBlock) {
+                                                                                return (
+                                                                                    <motion.div
+                                                                                        initial="hidden"
+                                                                                        whileInView="visible"
+                                                                                        viewport={{ once: true, margin: "-10% 0px" }}
+                                                                                        variants={scrollyVariants}
+                                                                                    >
+                                                                                        <CodeBlock className={className}>{String(children).replace(/\n$/, "")}</CodeBlock>
+                                                                                    </motion.div>
+                                                                                );
+                                                                            }
+                                                                            return <code className={className} {...props}>{children}</code>;
+                                                                        },
+                                                                        a({ href, children }) {
+                                                                            return <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>;
+                                                                        },
+                                                                    }}
+                                                                >
+                                                                    {viewMode === "detailed" ? detailedAnswer : (directAnswer || detailedAnswer)}
+                                                                </ReactMarkdown>
+                                                            </motion.div>
+                                                        )}
+                                                    </AnimatePresence>
+                                                </motion.div>
+                                            )}
+                                        </AnimatePresence>
 
-                                {isStreaming && (
-                                    <span className="inline-block w-0.5 h-5 bg-[#8b5cf6] animate-pulse ml-0.5 align-middle" />
-                                )}
+                                        {isStreaming && (
+                                            <span className="inline-block w-0.5 h-5 bg-[#8b5cf6] animate-pulse ml-0.5 align-middle" />
+                                        )}
 
-                                {!isLoading && !answer && !error && !query && (
-                                    <div className="flex items-center justify-center py-12">
-                                        <p className="text-sm text-[rgba(238,238,255,0.25)]">No query provided. Go back and search for something.</p>
+                                        {!isLoading && !answer && !error && !query && (
+                                            <div className="flex items-center justify-center py-12">
+                                                <p className="text-sm text-[rgba(238,238,255,0.25)]">No query provided. Go back and search for something.</p>
+                                            </div>
+                                        )}
                                     </div>
-                                )}
-                            </div>
-                        </motion.div>
+                                </motion.div>
 
-                        {/* Ambient glow */}
-                        <div className="mx-auto mt-[-2px] w-3/4 h-12 rounded-full blur-3xl
+                                {/* Ambient glow */}
+                                <div className="mx-auto mt-[-2px] w-3/4 h-12 rounded-full blur-3xl
                             bg-gradient-to-r from-[#8b5cf6]/15 via-[#a855f7]/10 to-[#4f8fff]/15
                             pointer-events-none opacity-60" />
 
-                        {/* ===== Follow-up Chat ===== */}
-                        {showContent && (
-                            <motion.div
-                                className="mt-6"
-                                initial={{ opacity: 0, y: 10 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                transition={{ delay: 0.3, type: "spring", stiffness: 80, damping: 14 }}
-                            >
-                                {/* Chat messages */}
-                                {chatHistory.length > 0 && (
-                                    <div className="space-y-3 mb-4 max-h-[400px] overflow-y-auto pr-2 scrollbar-thin">
-                                        {chatHistory.map((msg, i) => (
-                                            <motion.div
-                                                key={i}
-                                                initial={{ opacity: 0, y: 6 }}
-                                                animate={{ opacity: 1, y: 0 }}
-                                                className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
-                                            >
-                                                <div
-                                                    className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm ${msg.role === "user"
-                                                        ? "bg-[rgba(168,85,247,0.1)] border border-[rgba(168,85,247,0.2)] text-[rgba(238,238,255,0.7)]"
-                                                        : "bg-[rgba(255,255,255,0.025)] border border-[rgba(255,255,255,0.05)] text-[rgba(238,238,255,0.6)]"
-                                                        }`}
-                                                >
-                                                    {msg.role === "assistant" ? (
-                                                        <div className="prose prose-invert prose-sm max-w-none prose-p:text-[rgba(238,238,255,0.6)] prose-p:leading-relaxed prose-strong:text-[#eeeeff] prose-a:text-[#4f8fff]">
-                                                            <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}
-                                                                components={{
-                                                                    code({ className, children }) {
-                                                                        const isBlock = className?.startsWith("language-") || String(children).includes("\n");
-                                                                        if (isBlock) return <CodeBlock className={className}>{String(children).replace(/\n$/, "")}</CodeBlock>;
-                                                                        return <code className={className}>{children}</code>;
-                                                                    },
-                                                                    a({ href, children }) {
-                                                                        return <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>;
-                                                                    },
-                                                                }}
-                                                            >{msg.content}</ReactMarkdown>
+                                {/* ===== Follow-up Chat ===== */}
+                                {showContent && (
+                                    <motion.div
+                                        className="mt-6"
+                                        initial={{ opacity: 0, y: 10 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        transition={{ delay: 0.3, type: "spring", stiffness: 80, damping: 14 }}
+                                    >
+                                        {/* Chat messages */}
+                                        {chatHistory.length > 0 && (
+                                            <div className="space-y-3 mb-4 max-h-[400px] overflow-y-auto pr-2 scrollbar-thin">
+                                                {chatHistory.map((msg, i) => (
+                                                    <motion.div
+                                                        key={i}
+                                                        initial={{ opacity: 0, y: 6 }}
+                                                        animate={{ opacity: 1, y: 0 }}
+                                                        className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
+                                                    >
+                                                        <div
+                                                            className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm ${msg.role === "user"
+                                                                ? "bg-[rgba(168,85,247,0.1)] border border-[rgba(168,85,247,0.2)] text-[rgba(238,238,255,0.7)]"
+                                                                : "bg-[rgba(255,255,255,0.025)] border border-[rgba(255,255,255,0.05)] text-[rgba(238,238,255,0.6)]"
+                                                                }`}
+                                                        >
+                                                            {msg.role === "assistant" ? (
+                                                                <div className="prose prose-invert prose-sm max-w-none prose-p:text-[rgba(238,238,255,0.6)] prose-p:leading-relaxed prose-strong:text-[#eeeeff] prose-a:text-[#4f8fff]">
+                                                                    <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}
+                                                                        components={{
+                                                                            code({ className, children }) {
+                                                                                const isBlock = className?.startsWith("language-") || String(children).includes("\n");
+                                                                                if (isBlock) return <CodeBlock className={className}>{String(children).replace(/\n$/, "")}</CodeBlock>;
+                                                                                return <code className={className}>{children}</code>;
+                                                                            },
+                                                                            a({ href, children }) {
+                                                                                return <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>;
+                                                                            },
+                                                                        }}
+                                                                    >{msg.content}</ReactMarkdown>
+                                                                </div>
+                                                            ) : (
+                                                                msg.content
+                                                            )}
                                                         </div>
-                                                    ) : (
-                                                        msg.content
-                                                    )}
-                                                </div>
-                                            </motion.div>
-                                        ))}
-                                        <div ref={chatEndRef} />
-                                    </div>
-                                )}
+                                                    </motion.div>
+                                                ))}
+                                                <div ref={chatEndRef} />
+                                            </div>
+                                        )}
 
-                                {/* Follow-up input */}
-                                <form
-                                    onSubmit={(e) => { e.preventDefault(); handleFollowUpSubmit(); }}
-                                    className="flex items-center gap-2"
-                                >
-                                    <div className="flex-1 flex items-center gap-2 px-4 py-3 rounded-2xl
+                                        {/* Follow-up input */}
+                                        <form
+                                            onSubmit={(e) => { e.preventDefault(); handleFollowUpSubmit(); }}
+                                            className="flex items-center gap-2"
+                                        >
+                                            <div className="flex-1 flex items-center gap-2 px-4 py-3 rounded-2xl
                                         bg-[rgba(255,255,255,0.025)] border border-[rgba(255,255,255,0.06)]
                                         backdrop-blur-xl focus-within:border-[rgba(168,85,247,0.3)]
                                         transition-all duration-300">
-                                        <input
-                                            type="text"
-                                            value={followUp}
-                                            onChange={(e) => setFollowUp(e.target.value)}
-                                            placeholder="Ask a follow-up question..."
-                                            disabled={followUpLoading}
-                                            className="flex-1 bg-transparent text-sm text-[#eeeeff] placeholder:text-[rgba(238,238,255,0.2)] outline-none disabled:opacity-50"
-                                        />
-                                        <motion.button
-                                            type="button"
-                                            onClick={toggleListening}
-                                            className={`p-1.5 rounded-lg cursor-pointer transition-all duration-300 ${isListening
-                                                ? "bg-[rgba(239,68,68,0.1)] text-red-400 mic-pulse"
-                                                : "text-[rgba(238,238,255,0.25)] hover:text-[#a855f7]"
-                                                }`}
-                                            whileTap={{ scale: 0.9 }}
-                                            title={isListening ? "Stop listening" : "Voice command (continuous)"}
-                                        >
-                                            {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-                                        </motion.button>
-                                    </div>
-                                    <motion.button
-                                        type="submit"
-                                        disabled={!followUp.trim() || followUpLoading}
-                                        className="p-3 rounded-2xl bg-gradient-to-r from-[#7c3aed] to-[#a855f7]
+                                                <input
+                                                    type="text"
+                                                    value={followUp}
+                                                    onChange={(e) => setFollowUp(e.target.value)}
+                                                    placeholder="Ask a follow-up question..."
+                                                    disabled={followUpLoading}
+                                                    className="flex-1 bg-transparent text-sm text-[#eeeeff] placeholder:text-[rgba(238,238,255,0.2)] outline-none disabled:opacity-50"
+                                                />
+                                                <motion.button
+                                                    type="button"
+                                                    onClick={toggleListening}
+                                                    className={`p-1.5 rounded-lg cursor-pointer transition-all duration-300 ${isListening
+                                                        ? "bg-[rgba(239,68,68,0.1)] text-red-400 mic-pulse"
+                                                        : "text-[rgba(238,238,255,0.25)] hover:text-[#a855f7]"
+                                                        }`}
+                                                    whileTap={{ scale: 0.9 }}
+                                                    title={isListening ? "Stop listening" : "Voice command (continuous)"}
+                                                >
+                                                    {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                                                </motion.button>
+                                            </div>
+                                            <motion.button
+                                                type="submit"
+                                                disabled={!followUp.trim() || followUpLoading}
+                                                className="p-3 rounded-2xl bg-gradient-to-r from-[#7c3aed] to-[#a855f7]
                                             text-white disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer
                                             transition-all duration-200"
-                                        whileHover={{ scale: 1.05 }}
-                                        whileTap={{ scale: 0.95 }}
-                                    >
-                                        {followUpLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <SendHorizonal className="w-4 h-4" />}
-                                    </motion.button>
-                                </form>
-                            </motion.div>
-                        )}
-                        {/* ===== Deep Dive Toolbar ===== */}
-                        {showContent && !isStreaming && <DeepDiveToolbar query={query} />}
-                    </div>
+                                                whileHover={{ scale: 1.05 }}
+                                                whileTap={{ scale: 0.95 }}
+                                            >
+                                                {followUpLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <SendHorizonal className="w-4 h-4" />}
+                                            </motion.button>
+                                        </form>
+                                    </motion.div>
+                                )}
+                                {/* ===== Deep Dive Toolbar ===== */}
+                                {showContent && !isStreaming && <DeepDiveToolbar query={query} />}
+                            </div>
 
-                    {/* ===== Entities Sidebar ===== */}
-                    {showContent && <EntitiesSidebar answer={answer} />}
-                </motion.div>
+                            {/* ===== Entities Sidebar ===== */}
+                            {showContent && <EntitiesSidebar answer={answer} />}
+                        </motion.div>
+
+                    </>
+                )}
 
                 {/* ===== Footer ===== */}
                 <motion.footer className="mt-auto pt-12 pb-8 flex flex-col items-center gap-2 text-center"

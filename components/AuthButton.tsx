@@ -1,33 +1,17 @@
 "use client";
 
-import { useState, useEffect } from "react";
 import { User } from "@supabase/supabase-js";
 import { LogIn, LogOut } from "lucide-react";
 import { motion } from "framer-motion";
 import { supabaseBrowser } from "@/lib/supabaseClient";
+import { useAuth } from "@/hooks/useAuth";
 
 interface AuthButtonProps {
     onSignInClick: () => void;
 }
 
 export default function AuthButton({ onSignInClick }: AuthButtonProps) {
-    const [user, setUser] = useState<User | null>(null);
-
-    useEffect(() => {
-        if (!supabaseBrowser) return;
-
-        supabaseBrowser.auth.getUser().then(({ data }) => {
-            setUser(data.user);
-        });
-
-        const { data: { subscription } } = supabaseBrowser.auth.onAuthStateChange(
-            (_event, session) => {
-                setUser(session?.user ?? null);
-            }
-        );
-
-        return () => subscription.unsubscribe();
-    }, []);
+    const { user } = useAuth();
 
     const handleSignOut = async () => {
         if (!supabaseBrowser) return;
@@ -103,7 +87,7 @@ export default function AuthButton({ onSignInClick }: AuthButtonProps) {
                     "
                 >
                     <LogOut className="w-3.5 h-3.5" />
-                    <span className="hidden sm:inline">Sign Out</span>
+                    <span className="text-xs">Sign Out</span>
                 </button>
             </motion.div>
         );

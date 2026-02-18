@@ -84,7 +84,7 @@ export async function callOpenRouter(
 
             // Handle Credit Limit / Quota Errors (402 Payment Required or related)
             if (response.status === 402 || errorText.toLowerCase().includes("credit") || errorText.toLowerCase().includes("quota") || errorText.toLowerCase().includes("insufficient")) {
-                throw new Error("Our AI models are resting right now. Please come back tomorrow or try a different mode! 🚀");
+                throw new Error("Our AI is resting. Please come back tomorrow! 🚀");
             }
 
             throw new Error(`OpenRouter API error ${response.status}: ${errorText}`);

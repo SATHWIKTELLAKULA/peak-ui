@@ -763,7 +763,7 @@ export async function GET(request: NextRequest) {
 
         // Mask technical credit errors with friendly message
         if (msg.includes("401") || msg.includes("402") || msg.includes("429") || msg.includes("insufficient_quota") || msg.includes("billing") || msg.includes("credit") || msg.includes("key")) {
-            userMessage = "Our AI models are resting right now. Please come back tomorrow or try a different mode! 🚀";
+            userMessage = "Our AI is resting. Please come back tomorrow! 🚀";
         }
 
         return NextResponse.json({
@@ -828,7 +828,7 @@ export async function POST(request: NextRequest) {
 
         // Mask technical credit errors with friendly message
         if (msg.includes("401") || msg.includes("402") || msg.includes("429") || msg.includes("insufficient_quota") || msg.includes("billing") || msg.includes("credit") || msg.includes("key")) {
-            userMessage = "Our AI models are resting right now. Please come back tomorrow or try a different mode! 🚀";
+            userMessage = "Our AI is resting. Please come back tomorrow! 🚀";
         }
 
         return NextResponse.json({

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Loader2 } from "lucide-react";
+import { X, Loader2, Lock, ShieldCheck } from "lucide-react";
 import { supabaseBrowser } from "@/lib/supabaseClient";
 
 type Tab = "login" | "signup";
@@ -40,6 +40,7 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
     const [success, setSuccess] = useState("");
     const [loading, setLoading] = useState(false);
     const [oauthLoading, setOauthLoading] = useState<"google" | "github" | null>(null);
+    const [showPrivacy, setShowPrivacy] = useState(false);
 
     /* ── Email / Password submit ── */
     const handleSubmit = async (e: React.FormEvent) => {
@@ -207,7 +208,7 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
                                     ) : (
                                         <GoogleIcon className="w-5 h-5" />
                                     )}
-                                    <span>{oauthLoading === "google" ? "Warping to Google..." : "Continue with Google"}</span>
+                                    <span>{oauthLoading === "google" ? "Authenticating..." : "Continue with Google"}</span>
                                 </motion.button>
 
                                 {/* GitHub */}
@@ -239,7 +240,7 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
                                     ) : (
                                         <GitHubIcon className="w-5 h-5 text-[rgba(238,238,255,0.7)]" />
                                     )}
-                                    <span>{oauthLoading === "github" ? "Warping to GitHub..." : "Continue with GitHub"}</span>
+                                    <span>{oauthLoading === "github" ? "Authenticating..." : "Continue with GitHub"}</span>
                                 </motion.button>
                             </div>
 
@@ -323,6 +324,36 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
                                 >
                                     {loading ? "Please wait..." : tab === "login" ? "Log In" : "Create Account"}
                                 </button>
+
+                                {/* Trust & Privacy Elements */}
+                                <div className="mt-6 pt-0 border-t border-white/5 flex flex-col items-center gap-3">
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowPrivacy(!showPrivacy)}
+                                        className="text-[10px] text-zinc-500 hover:text-zinc-300 underline underline-offset-2 transition-colors cursor-pointer flex items-center gap-1.5"
+                                    >
+                                        <ShieldCheck className="w-3 h-3" />
+                                        Your Privacy
+                                    </button>
+
+                                    <AnimatePresence>
+                                        {showPrivacy && (
+                                            <motion.div
+                                                initial={{ opacity: 0, height: 0 }}
+                                                animate={{ opacity: 1, height: "auto" }}
+                                                exit={{ opacity: 0, height: 0 }}
+                                                className="w-full text-[10px] text-zinc-400 bg-white/5 rounded-lg p-3 text-center leading-relaxed overflow-hidden"
+                                            >
+                                                We only use your name & photo to personalize your experience. We do not sell your data.
+                                            </motion.div>
+                                        )}
+                                    </AnimatePresence>
+
+                                    <p className="text-[9px] text-zinc-700 font-bold uppercase tracking-widest flex items-center gap-1.5 opacity-60">
+                                        <Lock className="w-2.5 h-2.5" />
+                                        Secured by Supabase & OAuth 2.0
+                                    </p>
+                                </div>
                             </form>
                         </div>
                     </motion.div>

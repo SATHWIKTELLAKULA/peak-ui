@@ -1,10 +1,11 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Sparkles, Zap, Shield, Clock, ArrowRight, Settings } from "lucide-react";
+import { Sparkles, Zap, Shield, Clock, ArrowRight, Settings, AlertCircle } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import Image from "next/image";
+import { supabaseBrowser } from "@/lib/supabaseClient";
 import SearchBar from "@/components/SearchBar";
 import RateLimitHandler from "@/components/RateLimitHandler";
 import AuthButton from "@/components/AuthButton";
@@ -12,8 +13,11 @@ import AuthModal from "@/components/AuthModal";
 import SettingsDrawer from "@/components/SettingsDrawer";
 import AboutSection from "@/components/AboutSection";
 import NeuralModeSelector from "@/components/NeuralModeSelector";
+import LockedModeCard from "@/components/LockedModeCard";
 import { playInteractionSound, playBootSequence } from "@/utils/audioManager";
 import dynamic from "next/dynamic";
+import { useAuth } from "@/hooks/useAuth";
+import { useSettings } from "@/contexts/SettingsContext";
 
 
 const BootSequence = dynamic(() => import("@/components/BootSequence"), { ssr: false });
@@ -81,18 +85,51 @@ export default function Home() {
   const [logoExists, setLogoExists] = useState(false);
   const [nebulaExplosion, setNebulaExplosion] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
+  const [toast, setToast] = useState("");
   const aboutRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
 
   useEffect(() => {
-    fetch("/api/history?limit=5")
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.history) setRecentSearches(data.history);
-      })
-      .catch(() => { })
-      .finally(() => setHistoryLoading(false));
+    const hash = window.location.hash.substring(1);
+    const params = new URLSearchParams(hash);
+    if (params.get("error")) {
+      setToast("Login cancelled. Feel free to explore Flash mode!");
+      setTimeout(() => setToast(""), 6000);
+      window.history.replaceState(null, "", window.location.pathname);
+    }
   }, []);
+
+  const { isLoggedIn, loading: authLoading } = useAuth();
+  const { neuralMode } = useSettings();
+
+  // Premium Lock Logic: Flash is free, everything else requires auth
+  const isLocked = !authLoading && !isLoggedIn && neuralMode !== "flash";
+
+  useEffect(() => {
+    if (authLoading) return;
+
+    if (!isLoggedIn || !supabaseBrowser) {
+      setHistoryLoading(false);
+      return;
+    }
+
+    const fetchHistory = async () => {
+      try {
+        const { data, error } = await supabaseBrowser!
+          .from("search_history")
+          .select("id, query, answer, created_at")
+          .order("created_at", { ascending: false })
+          .limit(5);
+
+        if (data && !error) {
+          setRecentSearches(data);
+        }
+      } catch { }
+      setHistoryLoading(false);
+    };
+
+    fetchHistory();
+  }, [isLoggedIn, authLoading]);
 
   /* Check if logo file exists */
   useEffect(() => {
@@ -246,9 +283,31 @@ export default function Home() {
             <NeuralModeSelector />
           </motion.div>
 
-          {/* Search Bar - Index 2 (0.4s) */}
-          <motion.div layout custom={2} variants={fadeUp} className="w-full mb-6">
-            <SearchBar onTyping={setIsTyping} />
+          {/* Search Bar OR Locked Card - Index 2 (0.4s) */}
+          <motion.div layout custom={2} variants={fadeUp} className="w-full mb-6 relative z-20">
+            <AnimatePresence mode="wait">
+              {isLocked ? (
+                <motion.div
+                  key="locked"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  transition={{ duration: 0.3 }}
+                >
+                  <LockedModeCard />
+                </motion.div>
+              ) : (
+                <motion.div
+                  key="search"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  transition={{ duration: 0.3 }}
+                >
+                  <SearchBar onTyping={setIsTyping} />
+                </motion.div>
+              )}
+            </AnimatePresence>
           </motion.div>
 
           {/* Hint */}
@@ -376,6 +435,21 @@ export default function Home() {
 
       {/* ===== Boot Sequence Overlay ===== */}
       <BootSequence onComplete={() => { }} />
+
+      {/* ===== Toast Notification ===== */}
+      <AnimatePresence>
+        {toast && (
+          <motion.div
+            initial={{ opacity: 0, y: 20, x: "-50%" }}
+            animate={{ opacity: 1, y: 0, x: "-50%" }}
+            exit={{ opacity: 0, y: 20, x: "-50%" }}
+            className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[60] bg-red-500/10 border border-red-500/20 text-red-200 px-6 py-3 rounded-full text-sm flex items-center gap-3 backdrop-blur-md shadow-2xl"
+          >
+            <AlertCircle className="w-4 h-4" />
+            {toast}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </>
   );
 }

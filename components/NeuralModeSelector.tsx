@@ -3,9 +3,9 @@
 import { motion, AnimatePresence } from "framer-motion";
 import { Zap, Brain, Palette, Lock, Image as ImageIcon, Eye, Clapperboard, Sparkles, Terminal } from "lucide-react";
 import { useSettings, NeuralMode, CreativeSubMode } from "@/contexts/SettingsContext";
-import { useState, useEffect } from "react";
-import { supabaseBrowser } from "@/lib/supabaseClient";
+import { useState } from "react";
 import { playInteractionSound } from "@/utils/audioManager";
+import { useAuth } from "@/hooks/useAuth";
 
 const MODES: {
     id: NeuralMode;
@@ -35,7 +35,7 @@ const MODES: {
             description: "Deep reasoning",
             color: "#7c3aed",
             glowColor: "rgba(124,58,237,0.25)",
-            requiresAuth: false,
+            requiresAuth: true,
         },
         {
             id: "code",
@@ -45,7 +45,7 @@ const MODES: {
             description: "Engineering",
             color: "#10b981",
             glowColor: "rgba(16,185,129,0.25)",
-            requiresAuth: false,
+            requiresAuth: true,
         },
         {
             id: "creative",
@@ -55,7 +55,7 @@ const MODES: {
             description: "Multimedia Creation",
             color: "#ec4899",
             glowColor: "rgba(236,72,153,0.25)",
-            requiresAuth: false,
+            requiresAuth: true,
         },
     ];
 
@@ -72,26 +72,11 @@ const SUBMODES: {
 
 export default function NeuralModeSelector() {
     const { neuralMode, setNeuralMode, creativeSubMode, setCreativeSubMode, videoQuality, setVideoQuality } = useSettings();
-    const [isLoggedIn, setIsLoggedIn] = useState(false);
+    const { isLoggedIn } = useAuth();
     const [showTooltip, setShowTooltip] = useState(false);
 
-    useEffect(() => {
-        if (!supabaseBrowser) return;
-        supabaseBrowser.auth.getSession().then(({ data }) => {
-            setIsLoggedIn(!!data.session?.user);
-        });
-        const { data: listener } = supabaseBrowser.auth.onAuthStateChange((_event, session) => {
-            setIsLoggedIn(!!session?.user);
-        });
-        return () => listener.subscription.unsubscribe();
-    }, []);
-
     const handleSelect = (mode: typeof MODES[number]) => {
-        if (mode.requiresAuth && !isLoggedIn) {
-            setShowTooltip(true);
-            setTimeout(() => setShowTooltip(false), 2500);
-            return;
-        }
+        // Allow selection even if locked, to show lock screen
         setNeuralMode(mode.id);
         playInteractionSound("click");
     };
