@@ -651,7 +651,7 @@ function SearchResultsContent() {
             }
         } catch (err: unknown) {
             if (err instanceof Error && err.name === "AbortError") return;
-            setError(err instanceof Error ? err.message : "Neural Connection Interrupted.");
+            setError("Peak is processing a lot of requests! Please try again in a few seconds.");
         } finally {
             import("@/utils/audioManager").then(m => m.stopHum());
             setIsLoading(false);

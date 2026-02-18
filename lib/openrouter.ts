@@ -5,12 +5,12 @@
  */
 
 export enum PeakModel {
-    CODE = "google/gemini-2.0-flash-lite-preview-02-05:free",
-    PRO = "google/gemini-2.0-flash-lite-preview-02-05:free",
-    FLASH = "google/gemini-2.0-flash-lite-preview-02-05:free",
-    THINK = "google/gemini-2.0-flash-lite-preview-02-05:free",
-    CREATIVE = "google/gemini-2.0-flash-lite-preview-02-05:free",
-    DEFAULT = "google/gemini-2.0-flash-lite-preview-02-05:free"
+    CODE = "google/gemma-3-27b-it:free",
+    PRO = "google/gemma-3-27b-it:free",
+    FLASH = "google/gemma-3-27b-it:free",
+    THINK = "google/gemma-3-27b-it:free",
+    CREATIVE = "google/gemma-3-27b-it:free",
+    DEFAULT = "google/gemma-3-27b-it:free"
 }
 
 export interface LLMConfig {
