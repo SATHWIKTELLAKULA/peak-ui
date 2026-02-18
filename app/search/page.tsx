@@ -125,6 +125,7 @@ interface ChatMessage {
 function SearchResultsContent() {
     const searchParams = useSearchParams();
     const router = useRouter();
+    const { responseLength, voiceGender, neuralMode, creativeSubMode, language, videoQuality } = useSettings();
     const query = searchParams.get("q") || "";
 
     // Clear only invalid/empty cache entries on mount
@@ -169,7 +170,6 @@ function SearchResultsContent() {
     const [showRateLimit, setShowRateLimit] = useState(false);
     const [authOpen, setAuthOpen] = useState(false);
     const [settingsOpen, setSettingsOpen] = useState(false);
-    const { responseLength, voiceGender, neuralMode, creativeSubMode, language, videoQuality } = useSettings();
 
     /* ── Dual-View State ── */
     const [viewMode, setViewMode] = useState<"direct" | "detailed">("detailed");
@@ -430,6 +430,11 @@ function SearchResultsContent() {
 
         // Gate check
         if (neuralMode !== "flash") {
+            if (!supabaseBrowser) {
+                setIsLocked(true);
+                setIsLoading(false);
+                return;
+            }
             const { data: { session } } = await supabaseBrowser.auth.getSession();
             if (!session?.user) {
                 setIsLocked(true);
