@@ -651,7 +651,7 @@ function SearchResultsContent() {
             }
         } catch (err: unknown) {
             if (err instanceof Error && err.name === "AbortError") return;
-            setError("Peak is processing a lot of requests! Please try again in a few seconds.");
+            setError("Peak is optimizing your results, please try again in a moment.");
         } finally {
             import("@/utils/audioManager").then(m => m.stopHum());
             setIsLoading(false);

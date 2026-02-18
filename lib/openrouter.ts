@@ -5,12 +5,12 @@
  */
 
 export enum PeakModel {
-    CODE = "google/gemma-3-27b-it:free",
-    PRO = "google/gemma-3-27b-it:free",
-    FLASH = "google/gemma-3-27b-it:free",
-    THINK = "google/gemma-3-27b-it:free",
-    CREATIVE = "google/gemma-3-27b-it:free",
-    DEFAULT = "google/gemma-3-27b-it:free"
+    CODE = "meta-llama/llama-3.1-8b-instruct:free",
+    PRO = "meta-llama/llama-3.1-8b-instruct:free",
+    FLASH = "meta-llama/llama-3.1-8b-instruct:free",
+    THINK = "meta-llama/llama-3.1-8b-instruct:free",
+    CREATIVE = "meta-llama/llama-3.1-8b-instruct:free",
+    DEFAULT = "meta-llama/llama-3.1-8b-instruct:free"
 }
 
 export interface LLMConfig {
