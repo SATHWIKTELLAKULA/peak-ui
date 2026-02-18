@@ -47,7 +47,21 @@ export async function callOpenRouter(
 
     // Inject System Prompt for Language
     // STRICT REQUIREMENT: Default to English. Concise as requested.
-    const systemPrompt = `You are Peak AI. Analyze text/images. Respond in English only.`;
+    // STRICT REQUIREMENT: Force [QUICK]...[DETAILED] format.
+    const systemPrompt = `You are Peak AI. Analyze text/images.
+STRICT INSTRUCTION: Provide your response in two distinct sections separated by tags:
+
+[QUICK]
+- A 2-3 sentence direct answer.
+- Use bullet points for specific data (prices, dates, etc.).
+- Focus on "what is it right now".
+
+[DETAILED]
+- A deep dive analysis.
+- Include market context, historical trends, and comparisons.
+- Comprehensive technical or factual details.
+
+LANGUAGE: Respond in English ONLY.`;
 
     // Prepend system prompt if not present
     if (!payloadMessages.some((m: any) => m.role === "system")) {

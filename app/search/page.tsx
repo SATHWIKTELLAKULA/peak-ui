@@ -614,26 +614,55 @@ function SearchResultsContent() {
                 }
             }
 
-            // Final verification
+            // Final verification and splitting
             try {
-                const finalJson = JSON.parse(accumulated);
+                let fullContent = accumulated;
+                let isJson = false;
+                let grounded = false;
 
-                // Flexible parsing to handle various backend formats
-                const detailed = finalJson.detailed_answer || finalJson.answer || accumulated;
-                const direct = finalJson.direct_answer || "";
-
-                const grounded = finalJson.is_grounded || false;
-
-                setDirectAnswer(direct);
-                setDetailedAnswer(detailed);
-                setAnswer(detailed);
-                setIsGrounded(grounded);
-            } catch (e) {
-                // If it's not JSON, treat the whole thing as the answer
-                if (accumulated.trim()) {
-                    setAnswer(accumulated);
-                    setDetailedAnswer(accumulated);
+                // 1. Try to extract content from JSON wrapper if present
+                try {
+                    const finalJson = JSON.parse(accumulated);
+                    fullContent = finalJson.detailed_answer || finalJson.answer || accumulated;
+                    grounded = finalJson.is_grounded || false;
+                    isJson = true;
+                } catch (e) {
+                    // Raw text stream
                 }
+
+                // 2. Parse the content for separators
+                if (fullContent.includes("[DETAILED]")) {
+                    const parts = fullContent.split("[DETAILED]");
+                    // Remove [QUICK] tag and any leading info from the first part
+                    let quickPart = parts[0].replace(/\[QUICK\]/g, "").trim();
+                    let detailedPart = parts[1].trim();
+
+                    // Fallback check
+                    if (!detailedPart) detailedPart = quickPart;
+
+                    setDirectAnswer(quickPart);
+                    setDetailedAnswer(detailedPart);
+                    setAnswer(detailedPart);
+                    setIsGrounded(grounded);
+                } else {
+                    // No tags found - Fallback to standard behavior
+                    if (isJson) {
+                        const finalJson = JSON.parse(accumulated);
+                        setDirectAnswer(finalJson.direct_answer || fullContent.slice(0, 200) + "...");
+                        setDetailedAnswer(fullContent);
+                        setAnswer(fullContent);
+                        setIsGrounded(grounded);
+                    } else {
+                        setDirectAnswer(fullContent.slice(0, 200) + "...");
+                        setDetailedAnswer(fullContent);
+                        setAnswer(fullContent);
+                    }
+                }
+            } catch (e) {
+                console.error("Parsing error:", e);
+                // Last ditch fallback
+                setAnswer(accumulated);
+                setDetailedAnswer(accumulated);
             }
 
             try {
@@ -1175,7 +1204,7 @@ function SearchResultsContent() {
                                                                         },
                                                                     }}
                                                                 >
-                                                                    {viewMode === "detailed" ? detailedAnswer : (directAnswer || detailedAnswer)}
+                                                                    {viewMode === "detailed" ? detailedAnswer : directAnswer}
                                                                 </ReactMarkdown>
                                                             </motion.div>
                                                         )}
