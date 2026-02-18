@@ -5,12 +5,12 @@
  */
 
 export enum PeakModel {
-    CODE = "openai/gpt-5.2-codex",
-    PRO = "anthropic/claude-4.6-opus",
-    FLASH = "google/gemini-2.0-flash-001",
-    THINK = "deepseek/deepseek-r1:free",
-    CREATIVE = "openai/gpt-5.2-pro",
-    DEFAULT = "google/gemini-2.0-flash-001"
+    CODE = "google/gemini-2.0-flash-lite-preview-02-05:free",
+    PRO = "google/gemini-2.0-flash-lite-preview-02-05:free",
+    FLASH = "google/gemini-2.0-flash-lite-preview-02-05:free",
+    THINK = "google/gemini-2.0-flash-lite-preview-02-05:free",
+    CREATIVE = "google/gemini-2.0-flash-lite-preview-02-05:free",
+    DEFAULT = "google/gemini-2.0-flash-lite-preview-02-05:free"
 }
 
 export interface LLMConfig {
@@ -46,8 +46,8 @@ export async function callOpenRouter(
     let payloadMessages = messages || [{ role: "user", content: query }];
 
     // Inject System Prompt for Language
-    // STRICT REQUIREMENT: Default to English.
-    const systemPrompt = `You are Peak AI. Respond ONLY in English. Only answer in another language if the user explicitly requests it.`;
+    // STRICT REQUIREMENT: Default to English. Concise as requested.
+    const systemPrompt = `You are Peak AI. Analyze text/images. Respond in English only.`;
 
     // Prepend system prompt if not present
     if (!payloadMessages.some((m: any) => m.role === "system")) {
@@ -55,55 +55,69 @@ export async function callOpenRouter(
     }
 
     // 3. Request Configuration
-    const controller = new AbortController();
-    const timeoutSeconds = model.includes("codex") || model.includes("opus") || model.includes("think") ? 90 : 60;
-    const timeoutId = setTimeout(() => controller.abort(), timeoutSeconds * 1000);
+    // Helper to perform fetch with specific model
+    const performFetch = async (targetModel: string) => {
+        const controller = new AbortController();
+        const timeoutSeconds = 60;
+        const timeoutId = setTimeout(() => controller.abort(), timeoutSeconds * 1000);
 
-    try {
-        const body: any = {
-            model: model,
-            messages: payloadMessages,
-            max_tokens: config.maxTokens || 1000,
-            ...config
-        };
+        try {
+            const body: any = {
+                model: targetModel,
+                messages: payloadMessages,
+                max_tokens: config.maxTokens || 1000,
+                ...config
+            };
 
-        const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-            method: "POST",
-            headers: {
-                "Authorization": `Bearer ${apiKey}`,
-                "Content-Type": "application/json",
-                "HTTP-Referer": "https://peak-neural-engine.netlify.app",
-                "X-Title": "Peak AI",
-            },
-            body: JSON.stringify(body),
-            signal: controller.signal,
-        });
+            const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+                method: "POST",
+                headers: {
+                    "Authorization": `Bearer ${apiKey}`,
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": "https://peak-neural-engine.netlify.app",
+                    "X-Title": "Peak AI",
+                },
+                body: JSON.stringify(body),
+                signal: controller.signal,
+            });
 
-        if (!response.ok) {
-            const errorText = await response.text();
-
-            // Handle Credit Limit / Quota Errors (402 Payment Required or related)
-            if (response.status === 402 || errorText.toLowerCase().includes("credit") || errorText.toLowerCase().includes("quota") || errorText.toLowerCase().includes("insufficient")) {
-                throw new Error("Our AI is resting. Please come back tomorrow! 🚀");
+            if (!response.ok) {
+                const errorText = await response.text();
+                // Handle Credit Limit / Quota Errors (402 Payment Required or related)
+                if (response.status === 402 || errorText.toLowerCase().includes("credit") || errorText.toLowerCase().includes("quota") || errorText.toLowerCase().includes("insufficient")) {
+                    throw new Error("Our AI is resting. Please come back tomorrow! 🚀");
+                }
+                throw new Error(`OpenRouter API error ${response.status}: ${errorText}`);
             }
 
-            throw new Error(`OpenRouter API error ${response.status}: ${errorText}`);
+            const data = await response.json();
+            const content = data.choices?.[0]?.message?.content || "No response received.";
+            return {
+                detailed_answer: content,
+                direct_answer: content.slice(0, 150) + "..."
+            };
+        } finally {
+            clearTimeout(timeoutId);
         }
+    };
 
-        const data = await response.json();
-        const content = data.choices?.[0]?.message?.content || "No response received.";
-
-        return {
-            detailed_answer: content,
-            direct_answer: content.slice(0, 150) + "..."
-        };
-
+    try {
+        // Attempt Primary Model
+        return await performFetch(model);
     } catch (error: any) {
-        if (error.name === 'AbortError') {
-            throw new Error(`Request timed out after ${timeoutSeconds} seconds`);
+        console.warn(`Primary model (${model}) failed. Attempting fallback...`, error.message);
+
+        // If the error is a definitive "Credit Limit" error from OpenRouter, strictly speaking we might fail everywhere, 
+        // but "free" models shouldn't hit credit limits unless rate limited. 
+        // We will try fallback for generic errors or even rate limits.
+
+        try {
+            const fallbackModel = "meta-llama/llama-3.1-8b-instruct:free";
+            return await performFetch(fallbackModel);
+        } catch (fallbackError: any) {
+            console.error("Fallback model also failed.", fallbackError.message);
+            // Return original error to helpful debugging or friendly message
+            throw error;
         }
-        throw error;
-    } finally {
-        clearTimeout(timeoutId);
     }
 }

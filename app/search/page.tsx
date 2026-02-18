@@ -5,7 +5,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import {
     ArrowLeft, Sparkles, Search, Loader2, AlertCircle, RefreshCw,
     Settings, Volume2, VolumeX, Pin, PinOff, Copy, Check,
-    Mic, MicOff, SendHorizonal, Save, Download,
+    Mic, MicOff, SendHorizonal, Save, Download, Paperclip, X, FileText, ImageIcon
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import Image from "next/image";
@@ -23,6 +23,7 @@ import EntitiesSidebar from "@/components/EntitiesSidebar";
 import DeepDiveToolbar from "@/components/DeepDiveToolbar";
 import SkeletonLoader from "@/components/SkeletonLoader";
 import { supabaseBrowser } from "@/lib/supabaseClient";
+import { readFileAsBase64, uploadFileToSupabase, Attachment } from "@/utils/fileUpload";
 import { useSettings } from "@/contexts/SettingsContext";
 import type { NeuralMode } from "@/contexts/SettingsContext";
 import ResponseToggle from "@/components/ResponseToggle";
@@ -116,7 +117,7 @@ function CodeBlock({ children, className }: { children: string; className?: stri
 /* ── Conversation message type ── */
 interface ChatMessage {
     role: "user" | "assistant";
-    content: string;
+    content: string | any[];
 }
 
 /* ═══════════════════════════════════════════════════
@@ -229,6 +230,11 @@ function SearchResultsContent() {
 
     const lastFetchedQuery = useRef<string | null>(null);
     const abortRef = useRef<AbortController | null>(null);
+
+    // Multimodal State
+    const [followUpAttachment, setFollowUpAttachment] = useState<Attachment | null>(null);
+    const [isUploading, setIsUploading] = useState(false);
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
     /* ── Pre-load speech voices ── */
     useEffect(() => {
@@ -498,9 +504,46 @@ function SearchResultsContent() {
         }
 
         try {
-            const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&length=${responseLength}&mode=${effectiveMode}&lang=${language}&quality=${videoQuality}`, {
-                signal: controller.signal,
-            });
+            let res;
+            let initialAttachment: Attachment | null = null;
+
+            // Check for pending attachment from SearchBar
+            try {
+                const pending = sessionStorage.getItem("peak_pending_attachment");
+                if (pending) {
+                    initialAttachment = JSON.parse(pending);
+                    sessionStorage.removeItem("peak_pending_attachment");
+                }
+            } catch (e) {
+                console.error("Failed to parse attachment", e);
+            }
+
+            if (initialAttachment) {
+                // Construct multimodal request
+                const content = [
+                    { type: "text", text: q },
+                    initialAttachment.type === "image"
+                        ? { type: "image_url", image_url: { url: initialAttachment.base64 } }
+                        : { type: "text", text: `[User uploaded file: ${initialAttachment.url}]` }
+                ];
+
+                res = await fetch("/api/search", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        messages: [{ role: "user", content }],
+                        length: responseLength,
+                        mode: effectiveMode,
+                        lang: language,
+                        quality: videoQuality
+                    }),
+                    signal: controller.signal,
+                });
+            } else {
+                res = await fetch(`/api/search?q=${encodeURIComponent(q)}&length=${responseLength}&mode=${effectiveMode}&lang=${language}&quality=${videoQuality}`, {
+                    signal: controller.signal,
+                });
+            }
 
             if (res.status === 429) {
                 setShowRateLimit(true);
@@ -646,9 +689,19 @@ function SearchResultsContent() {
     /* ── Follow-up conversation ── */
     const handleFollowUpSubmit = async (overrideText?: string) => {
         const text = overrideText || followUp;
-        if (!text.trim() || followUpLoading) return;
+        if ((!text.trim() && !followUpAttachment) || followUpLoading) return;
 
-        const userMsg: ChatMessage = { role: "user", content: text.trim() };
+        let userContent: any = text.trim();
+        if (followUpAttachment) {
+            userContent = [
+                { type: "text", text: text.trim() },
+                followUpAttachment.type === "image"
+                    ? { type: "image_url", image_url: { url: followUpAttachment.base64 } }
+                    : { type: "text", text: `[User file: ${followUpAttachment.url}]` }
+            ];
+        }
+
+        const userMsg: ChatMessage = { role: "user", content: userContent };
         const history: ChatMessage[] = [
             { role: "user", content: query },
             { role: "assistant", content: answer },
@@ -658,6 +711,7 @@ function SearchResultsContent() {
 
         setChatHistory((prev) => [...prev, userMsg]);
         setFollowUp("");
+        setFollowUpAttachment(null);
         setFollowUpLoading(true);
 
         try {
@@ -1167,10 +1221,25 @@ function SearchResultsContent() {
                                                                                 return <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>;
                                                                             },
                                                                         }}
-                                                                    >{msg.content}</ReactMarkdown>
+                                                                    >{typeof msg.content === 'string' ? msg.content : ''}</ReactMarkdown>
                                                                 </div>
                                                             ) : (
-                                                                msg.content
+                                                                // User Message
+                                                                <div className="flex flex-col gap-2">
+                                                                    {Array.isArray(msg.content) ? (
+                                                                        <>
+                                                                            {msg.content.map((part, idx) => {
+                                                                                if (part.type === 'text') return <span key={idx}>{part.text}</span>;
+                                                                                if (part.type === 'image_url') return (
+                                                                                    <img key={idx} src={part.image_url.url} alt="Attached" className="max-w-full rounded-lg border border-white/10" />
+                                                                                );
+                                                                                return null;
+                                                                            })}
+                                                                        </>
+                                                                    ) : (
+                                                                        msg.content
+                                                                    )}
+                                                                </div>
                                                             )}
                                                         </div>
                                                     </motion.div>
@@ -1184,37 +1253,100 @@ function SearchResultsContent() {
                                             onSubmit={(e) => { e.preventDefault(); handleFollowUpSubmit(); }}
                                             className="flex items-center gap-2"
                                         >
-                                            <div className="flex-1 flex items-center gap-2 px-4 py-3 rounded-2xl
+                                            <div className="flex-1 flex flex-col gap-2 p-2 rounded-2xl
                                         bg-[rgba(255,255,255,0.025)] border border-[rgba(255,255,255,0.06)]
                                         backdrop-blur-xl focus-within:border-[rgba(168,85,247,0.3)]
                                         transition-all duration-300">
-                                                <input
-                                                    type="text"
-                                                    value={followUp}
-                                                    onChange={(e) => setFollowUp(e.target.value)}
-                                                    placeholder="Ask a follow-up question..."
-                                                    disabled={followUpLoading}
-                                                    className="flex-1 bg-transparent text-sm text-[#eeeeff] placeholder:text-[rgba(238,238,255,0.2)] outline-none disabled:opacity-50"
-                                                />
-                                                <motion.button
-                                                    type="button"
-                                                    onClick={toggleListening}
-                                                    className={`p-1.5 rounded-lg cursor-pointer transition-all duration-300 ${isListening
-                                                        ? "bg-[rgba(239,68,68,0.1)] text-red-400 mic-pulse"
-                                                        : "text-[rgba(238,238,255,0.25)] hover:text-[#a855f7]"
-                                                        }`}
-                                                    whileTap={{ scale: 0.9 }}
-                                                    title={isListening ? "Stop listening" : "Voice command (continuous)"}
-                                                >
-                                                    {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-                                                </motion.button>
+
+                                                {/* Attachment Preview */}
+                                                <AnimatePresence>
+                                                    {followUpAttachment && (
+                                                        <motion.div
+                                                            initial={{ opacity: 0, height: 0 }}
+                                                            animate={{ opacity: 1, height: "auto" }}
+                                                            exit={{ opacity: 0, height: 0 }}
+                                                            className="flex items-center gap-2 bg-white/5 rounded-lg px-3 py-2"
+                                                        >
+                                                            <div className="w-8 h-8 rounded bg-white/10 flex items-center justify-center overflow-hidden">
+                                                                {followUpAttachment.type === "image" && followUpAttachment.base64 ? (
+                                                                    <img src={followUpAttachment.base64} alt="Preview" className="w-full h-full object-cover" />
+                                                                ) : (
+                                                                    <FileText className="w-4 h-4 text-indigo-400" />
+                                                                )}
+                                                            </div>
+                                                            <span className="text-xs text-white/70 truncate flex-1">{followUpAttachment.name}</span>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setFollowUpAttachment(null)}
+                                                                className="text-white/40 hover:text-white"
+                                                            >
+                                                                <X className="w-3.5 h-3.5" />
+                                                            </button>
+                                                        </motion.div>
+                                                    )}
+                                                </AnimatePresence>
+
+                                                <div className="flex items-center gap-2 px-2">
+                                                    <input
+                                                        type="text"
+                                                        value={followUp}
+                                                        onChange={(e) => setFollowUp(e.target.value)}
+                                                        placeholder="Ask a follow-up question..."
+                                                        disabled={followUpLoading}
+                                                        className="flex-1 bg-transparent text-sm text-[#eeeeff] placeholder:text-[rgba(238,238,255,0.2)] outline-none disabled:opacity-50 min-h-[24px]"
+                                                    />
+
+                                                    {/* Upload Button */}
+                                                    <button
+                                                        type="button"
+                                                        disabled={isUploading || followUpLoading}
+                                                        onClick={() => fileInputRef.current?.click()}
+                                                        className="text-[rgba(238,238,255,0.25)] hover:text-[#eeeeff] transition-colors"
+                                                    >
+                                                        {isUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Paperclip className="w-4 h-4" />}
+                                                        <input
+                                                            ref={fileInputRef}
+                                                            type="file"
+                                                            className="hidden"
+                                                            accept="image/png, image/jpeg, application/pdf"
+                                                            onChange={async (e) => {
+                                                                const file = e.target.files?.[0];
+                                                                if (!file) return;
+                                                                setIsUploading(true);
+                                                                try {
+                                                                    if (file.type.startsWith("image/")) {
+                                                                        const base64 = await readFileAsBase64(file);
+                                                                        setFollowUpAttachment({ type: "image", base64, name: file.name });
+                                                                    } else if (file.type === "application/pdf") {
+                                                                        const url = await uploadFileToSupabase(file);
+                                                                        if (url) setFollowUpAttachment({ type: "file", url, name: file.name });
+                                                                    }
+                                                                } catch (err) { console.error(err); }
+                                                                finally { setIsUploading(false); if (fileInputRef.current) fileInputRef.current.value = ""; }
+                                                            }}
+                                                        />
+                                                    </button>
+
+                                                    <motion.button
+                                                        type="button"
+                                                        onClick={toggleListening}
+                                                        className={`p-1.5 rounded-lg cursor-pointer transition-all duration-300 ${isListening
+                                                            ? "bg-[rgba(239,68,68,0.1)] text-red-400 mic-pulse"
+                                                            : "text-[rgba(238,238,255,0.25)] hover:text-[#a855f7]"
+                                                            }`}
+                                                        whileTap={{ scale: 0.9 }}
+                                                        title={isListening ? "Stop listening" : "Voice command (continuous)"}
+                                                    >
+                                                        {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                                                    </motion.button>
+                                                </div>
                                             </div>
                                             <motion.button
                                                 type="submit"
-                                                disabled={!followUp.trim() || followUpLoading}
+                                                disabled={(!followUp.trim() && !followUpAttachment) || followUpLoading}
                                                 className="p-3 rounded-2xl bg-gradient-to-r from-[#7c3aed] to-[#a855f7]
                                             text-white disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer
-                                            transition-all duration-200"
+                                            transition-all duration-200 self-end"
                                                 whileHover={{ scale: 1.05 }}
                                                 whileTap={{ scale: 0.95 }}
                                             >

@@ -447,7 +447,15 @@ async function callPuter(query: string, messages?: any[]) {
         // Construct prompt from messages if available
         let prompt = query;
         if (messages && messages.length > 0) {
-            prompt = messages.map((m: any) => `${m.role}: ${m.content}`).join("\n");
+            prompt = messages.map((m: any) => {
+                let contentStr = "";
+                if (Array.isArray(m.content)) {
+                    contentStr = m.content.map((c: any) => c.text || "[Media]").join(" ");
+                } else {
+                    contentStr = m.content;
+                }
+                return `${m.role}: ${contentStr}`;
+            }).join("\n");
         }
 
         // Attempt to use Puter AI Chat
@@ -476,36 +484,24 @@ async function callBytez(query: string, mode: string = "chat", messages?: any[],
     const isImageMode = mode === "image" || mode === "visualize";
     const isVideoMode = mode === "video";
 
-    // --- MODE ROUTING ---
+    // --- MODE ROUTING (Simplified for Free/Gemini Priority) ---
 
-    // 1. THINK MODE (DeepSeek R1)
+    // 1. THINK MODE
     if (mode === "think") {
-        console.log("[Think Mode] Routing to DeepSeek R1 (Reasoning)...");
-        return await callOpenRouter(query, messages, PeakModel.THINK, lang, { thinking: { type: "deep" } });
+        console.log("[Think Mode] Routing to PeakModel.THINK...");
+        return await callOpenRouter(query, messages, PeakModel.THINK, lang);
     }
 
-    // 2. FLASH MODE (Cerebras Llama 3.1-8b)
+    // 2. FLASH MODE
     if (mode === "flash") {
-        console.log("[Flash Mode] Engaged. Attempting Cerebras...");
-        const input = (messages && messages.length > 0) ? messages : query;
-        const cerebrasRes = await callCerebras(input);
-
-        if (cerebrasRes) return cerebrasRes;
-
-        console.warn("[Flash Mode] Cerebras failed, falling back to Gemini 2.0 Flash...");
+        console.log("[Flash Mode] Routing to PeakModel.FLASH...");
         return await callOpenRouter(query, messages, PeakModel.FLASH, lang);
     }
 
-    // 3. CHAT MODE (Puter.js - GPT-5 Nano)
+    // 3. CHAT MODE
     if (mode === "chat") {
-        console.log("[Chat Mode] Engaged. Attempting Puter.js...");
-        // Try Puter first
-        const puterResponse = await callPuter(query, messages);
-        if (puterResponse) return puterResponse;
-
-        console.warn("[Chat Mode] Puter failed, falling back to Flash (Gemini)...");
-        // Fallback to Gemini 2.0 Flash
-        return await callOpenRouter(query, messages, PeakModel.FLASH, lang);
+        console.log("[Chat Mode] Routing to PeakModel.DEFAULT...");
+        return await callOpenRouter(query, messages, PeakModel.DEFAULT, lang);
     }
 
     // --- HUGGING FACE (FLUX.1-schnell) - PRIMARY FOR IMAGE ---
@@ -583,25 +579,13 @@ async function callBytez(query: string, mode: string = "chat", messages?: any[],
 
     // --- OTHER MODES ---
 
-    // 1. CODE MODE (Priority 1)
+    // 1. CODE MODE
     if (mode === "code") {
-        console.log("[Code Mode] Engaged. Routing to Primary: GPT-5.2 Codex");
-
-        try {
-            // Primary: GPT-5.2 Codex with Max Effort
-            return await callOpenRouter(query, messages, PeakModel.CODE, lang, { effort: "max" });
-        } catch (primaryError) {
-            console.warn("[Code Mode] Primary Failed, engaging Reviewer/Fallback (Claude Opus)...");
-            try {
-                // Reviewer/Fallback: Claude Opus 4.6
-                return await callOpenRouter(query, messages, PeakModel.PRO, lang, { thinking: { type: "adaptive" } });
-            } catch (fallbackError) {
-                throw new Error(`Code Mode Failed. Primary: ${primaryError}, Fallback: ${fallbackError}`);
-            }
-        }
+        console.log("[Code Mode] Routing to PeakModel.CODE");
+        return await callOpenRouter(query, messages, PeakModel.CODE, lang);
     }
 
-    // 2. PRO / ANALYZE MODE (Priority 1)
+    // 2. PRO / ANALYZE MODE
     // Pro Mode / Analyze Mode -> Fetch Context via Tavily
     let searchContext = "";
     if (mode === "pro" || mode === "analyze") {
@@ -611,21 +595,14 @@ async function callBytez(query: string, mode: string = "chat", messages?: any[],
             searchContext = `\n\n[REAL-TIME SEARCH CONTEXT]:\n${tavilyData}\n\nUse this context to answer the user's question accurately.`;
         }
 
-        // Logic for Pro/Analyze using Claude Opus 4.6 (Premium Reasoning)
-        console.log(`[${mode} Mode] Routing to Primary: Claude Opus 4.6`);
-        try {
-            const enrichedQuery = query + searchContext;
-            return await callOpenRouter(enrichedQuery, messages, PeakModel.PRO, lang, { thinking: { type: "adaptive" } });
-        } catch (primaryError) {
-            console.warn(`[${mode} Mode] Primary Failed, engaging Fallback (GPT-5.2 Codex)...`);
-            const enrichedQuery = query + searchContext;
-            return await callOpenRouter(enrichedQuery, messages, PeakModel.CODE, lang);
-        }
+        console.log(`[${mode} Mode] Routing to PeakModel.PRO`);
+        const enrichedQuery = query + searchContext;
+        return await callOpenRouter(enrichedQuery, messages, PeakModel.PRO, lang);
     }
 
     // For any unhandled modes, fallback to Flash (Gemini)
-    console.log(`[Bytez] Default Fallback (Mode: ${mode}) -> Gemini 2.0 Flash`);
-    return await callOpenRouter(query, messages, PeakModel.FLASH, lang);
+    console.log(`[Bytez] Default Fallback (Mode: ${mode}) -> PeakModel.DEFAULT`);
+    return await callOpenRouter(query, messages, PeakModel.DEFAULT, lang);
 }
 
 
@@ -780,7 +757,13 @@ export async function POST(request: NextRequest) {
 
         let query = "";
         if (messages && Array.isArray(messages) && messages.length > 0) {
-            query = messages[messages.length - 1].content;
+            const lastMsg = messages[messages.length - 1];
+            if (Array.isArray(lastMsg.content)) {
+                const textPart = lastMsg.content.find((p: any) => p.type === "text");
+                query = textPart ? textPart.text : "";
+            } else {
+                query = lastMsg.content;
+            }
         }
 
         // Smart Routing: Override mode if intent is detected
