@@ -145,6 +145,27 @@ async function callTavily(query: string) {
     }
 }
 
+// --- Helper: Google Search API ---
+async function callGoogleSearch(query: string) {
+    const apiKey = process.env.GOOGLE_SEARCH_API_KEY;
+    const cx = process.env.NEXT_PUBLIC_GOOGLE_SEARCH_CX || "e5ec2e7bcf3e64e49";
+    if (!apiKey) return null;
+
+    try {
+        const url = `https://www.googleapis.com/customsearch/v1?key=${apiKey}&cx=${cx}&q=${encodeURIComponent(query)}&num=3`;
+        const response = await fetch(url);
+        if (!response.ok) return null;
+
+        const data = await response.json();
+        if (!data.items) return null;
+
+        return data.items.map((item: any) => `[${item.title}](${item.link}): ${item.snippet}`).join("\n");
+    } catch (e) {
+        console.error("Google Search Failed:", e);
+        return null;
+    }
+}
+
 // --- Helper: Fetch Anime Style Reference (HF Datasets) ---
 async function fetchAnimeStyleReference(): Promise<string | null> {
     const token = process.env.HUGGINGFACE_TOKEN;
@@ -483,62 +504,67 @@ async function callBytez(query: string, mode: string = "chat", messages?: any[],
     const lowerQuery = query.toLowerCase();
     const isImageMode = mode === "image" || mode === "visualize";
     const isVideoMode = mode === "video";
+    const isTextMode = !isImageMode && !isVideoMode;
 
-    // --- MODE ROUTING (Simplified for Free/Gemini Priority) ---
+    let enrichedQuery = query;
+    let enrichedMessages = messages ? [...messages] : undefined;
+    let isGrounded = false;
+
+    // --- SHARED GROUNDING LOGIC (For Think, Flash, Chat, etc.) ---
+    if (isTextMode) {
+        const liveKeywords = ["price", "news", "current", "stock", "usd", "weather", "latest", "today", "now", "live", "vs", "versus", "time"];
+        const needsGrounding = liveKeywords.some(k => lowerQuery.includes(k));
+
+        if (needsGrounding) {
+            console.log(`[Bytez] Grounding Triggered for Mode: ${mode}. Fetching live data...`);
+            let searchData = await callGoogleSearch(query);
+            if (!searchData) {
+                console.log("[Bytez] Google Search failed or no results. Trying Tavily fallback...");
+                searchData = await callTavily(query);
+            }
+
+            if (searchData) {
+                isGrounded = true;
+                const searchContext = `\n\n[LIVE SEARCH DATA]:\n${searchData}\n\nSTRICT INSTRUCTION: Answer using the search results provided above. DO NOT claim to be offline or say you lack real-time access. Use the search data as your absolute source of truth. ALWAYS include clickable source links ([Title](URL)) for verification. Respond in English only.`;
+
+                enrichedQuery = query + searchContext;
+                if (enrichedMessages && enrichedMessages.length > 0) {
+                    const lastIndex = enrichedMessages.length - 1;
+                    const lastMsg = { ...enrichedMessages[lastIndex] };
+                    if (typeof lastMsg.content === 'string') {
+                        lastMsg.content += searchContext;
+                    } else if (Array.isArray(lastMsg.content)) {
+                        const textPart = lastMsg.content.find((p: any) => p.type === "text");
+                        if (textPart) textPart.text += searchContext;
+                        else lastMsg.content.push({ type: "text", text: searchContext });
+                    }
+                    enrichedMessages[lastIndex] = lastMsg;
+                }
+            }
+        }
+    }
+
+    // --- MODE ROUTING ---
 
     // 1. THINK MODE
     if (mode === "think") {
         console.log("[Think Mode] Routing to PeakModel.THINK...");
-        return await callOpenRouter(query, messages, PeakModel.THINK, lang);
+        const result = await callOpenRouter(enrichedQuery, enrichedMessages, PeakModel.THINK, lang);
+        return isGrounded ? { ...result, is_grounded: true, search_sources: [] } : result;
     }
 
     // 2. FLASH MODE
     if (mode === "flash") {
         console.log("[Flash Mode] Routing to PeakModel.FLASH...");
-        return await callOpenRouter(query, messages, PeakModel.FLASH, lang);
+        const result = await callOpenRouter(enrichedQuery, enrichedMessages, PeakModel.FLASH, lang);
+        return isGrounded ? { ...result, is_grounded: true, search_sources: [] } : result;
     }
 
-    // 3. CHAT MODE (with "Grounding" Check)
+    // 3. CHAT MODE
     if (mode === "chat") {
         console.log("[Chat Mode] Routing to PeakModel.DEFAULT...");
-
-        // Smart Grounding: Check for "Live" keywords
-        const lowerQ = query.toLowerCase();
-        const liveKeywords = ["price", "news", "current", "stock", "usd", "weather", "latest", "today", "now", "live"];
-        const needsGrounding = liveKeywords.some(k => lowerQ.includes(k));
-
-        if (needsGrounding) {
-            console.log("[Chat Mode] Detected need for live data. Fetching Tavily context...");
-            const tavilyData = await callTavily(query);
-            if (tavilyData) {
-                const searchContext = `\n\n[REAL-TIME SEARCH CONTEXT]:\n${tavilyData}\n\nUse this context to answer accurately.`;
-                const enrichedQuery = query + searchContext;
-
-                // If messages exist, we need to inject context into the last message
-                if (messages && messages.length > 0) {
-                    const lastMsg = messages[messages.length - 1];
-                    // Clone to avoid mutation issues if any
-                    const newMessages = [...messages];
-                    if (typeof lastMsg.content === 'string') {
-                        newMessages[newMessages.length - 1] = { ...lastMsg, content: lastMsg.content + searchContext };
-                    } else if (Array.isArray(lastMsg.content)) {
-                        // Multimodal array - append to text part
-                        const textPart = lastMsg.content.find((p: any) => p.type === "text");
-                        if (textPart) {
-                            textPart.text += searchContext;
-                        } else {
-                            // fallback
-                            lastMsg.content.push({ type: "text", text: searchContext });
-                        }
-                    }
-                    return await callOpenRouter(query, newMessages, PeakModel.DEFAULT, lang);
-                }
-
-                return await callOpenRouter(enrichedQuery, messages, PeakModel.DEFAULT, lang);
-            }
-        }
-
-        return await callOpenRouter(query, messages, PeakModel.DEFAULT, lang);
+        const result = await callOpenRouter(enrichedQuery, enrichedMessages, PeakModel.DEFAULT, lang);
+        return isGrounded ? { ...result, is_grounded: true, search_sources: [] } : result;
     }
 
     // --- HUGGING FACE (FLUX.1-schnell) - PRIMARY FOR IMAGE ---

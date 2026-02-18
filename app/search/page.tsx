@@ -2,10 +2,11 @@
 
 import { useState, useEffect, useRef, useCallback, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
+import Script from "next/script";
 import {
     ArrowLeft, Sparkles, Search, Loader2, AlertCircle, RefreshCw,
     Settings, Volume2, VolumeX, Pin, PinOff, Copy, Check,
-    Mic, MicOff, SendHorizonal, Save, Download, Paperclip, X, FileText, ImageIcon
+    Mic, MicOff, SendHorizonal, Save, Download, Paperclip, X, FileText, ImageIcon, Globe
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import Image from "next/image";
@@ -235,6 +236,7 @@ function SearchResultsContent() {
     const [followUpAttachment, setFollowUpAttachment] = useState<Attachment | null>(null);
     const [isUploading, setIsUploading] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const [isGrounded, setIsGrounded] = useState(false);
 
     /* ── Pre-load speech voices ── */
     useEffect(() => {
@@ -492,6 +494,7 @@ function SearchResultsContent() {
         setDirectAnswer("");
         setDetailedAnswer("");
         setViewMode("detailed");
+        setIsGrounded(false);
 
         // Calculate Effective Mode for Backend
         let effectiveMode = "chat";
@@ -619,9 +622,12 @@ function SearchResultsContent() {
                 const detailed = finalJson.detailed_answer || finalJson.answer || accumulated;
                 const direct = finalJson.direct_answer || "";
 
+                const grounded = finalJson.is_grounded || false;
+
                 setDirectAnswer(direct);
                 setDetailedAnswer(detailed);
                 setAnswer(detailed);
+                setIsGrounded(grounded);
             } catch (e) {
                 // If it's not JSON, treat the whole thing as the answer
                 if (accumulated.trim()) {
@@ -967,8 +973,19 @@ function SearchResultsContent() {
                                                     className="w-full"
                                                 >
                                                     {/* Toggle Switcher & Actions */}
-                                                    <div className="mb-6 flex justify-center items-center gap-4">
+                                                    <div className="mb-6 flex flex-wrap justify-center items-center gap-4">
                                                         <ResponseToggle viewData={viewMode} onChange={setViewMode} />
+
+                                                        {isGrounded && (
+                                                            <motion.div
+                                                                initial={{ opacity: 0, x: -10 }}
+                                                                animate={{ opacity: 1, x: 0 }}
+                                                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-300 text-[10px] uppercase tracking-wider font-semibold"
+                                                            >
+                                                                <Globe className="w-3 h-3" />
+                                                                <span>Searched the Web</span>
+                                                            </motion.div>
+                                                        )}
 
                                                         {/* Download Button for Media */}
                                                         {(answer.startsWith("IMAGE_DATA:") || answer.startsWith("VIDEO_DATA:")) && isMediaLoaded && (
@@ -1378,6 +1395,14 @@ function SearchResultsContent() {
                     </p>
                 </motion.footer>
             </motion.main>
+
+            {/* Google Programmable Search Engine Implementation */}
+            <Script
+                src="https://cse.google.com/cse.js?cx=e5ec2e7bcf3e64e49"
+                strategy="afterInteractive"
+            />
+
+            {/* Hidden styled container for CSE if needed (Google injects its own UI via <div class="gcse-searchresults-only">) */}
         </>
     );
 }
