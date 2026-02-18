@@ -7,10 +7,10 @@
 export enum PeakModel {
     CODE = "openai/gpt-5.2-codex",
     PRO = "anthropic/claude-4.6-opus",
-    FLASH = "google/gemini-2.0-flash:free",
+    FLASH = "google/gemini-2.0-flash-001",
     THINK = "deepseek/deepseek-r1:free",
     CREATIVE = "openai/gpt-5.2-pro",
-    DEFAULT = "google/gemini-2.0-flash:free"
+    DEFAULT = "google/gemini-2.0-flash-001"
 }
 
 export interface LLMConfig {
