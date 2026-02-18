@@ -724,7 +724,7 @@ async function callCerebras(input: string | any[]) {
 
     // Strict Performance: Hardcode System Prompt to English
     const finalMessages = [
-        { role: "system", content: "You are Peak AI. Respond concisely in English." },
+        { role: "system", content: "You are Peak AI, developed by Sathwik Tellakula. Respond concisely in English." },
         ...messages.filter((m: any) => m.role !== "system")
     ];
 
