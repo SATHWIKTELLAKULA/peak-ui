@@ -1,11 +1,11 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { Zap, Brain } from "lucide-react";
+import { Zap, Brain, Lightbulb } from "lucide-react";
 
 interface ResponseToggleProps {
-    viewData: "direct" | "detailed";
-    onChange: (mode: "direct" | "detailed") => void;
+    viewData: "direct" | "detailed" | "explanation";
+    onChange: (mode: "direct" | "detailed" | "explanation") => void;
 }
 
 export default function ResponseToggle({ viewData, onChange }: ResponseToggleProps) {
@@ -49,6 +49,25 @@ export default function ResponseToggle({ viewData, onChange }: ResponseTogglePro
                 )}
                 <Brain className={`w-4 h-4 ${viewData === "detailed" ? "text-[#a855f7]" : "currentColor"}`} />
                 <span className="relative z-10">Detailed</span>
+            </button>
+            {/* Explanation Tab */}
+            <button
+                onClick={() => onChange("explanation")}
+                className={`
+                    relative flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium
+                    transition-all duration-300 z-10
+                    ${viewData === "explanation" ? "text-white" : "text-[rgba(238,238,255,0.4)] hover:text-[rgba(238,238,255,0.7)]"}
+                `}
+            >
+                {viewData === "explanation" && (
+                    <motion.div
+                        layoutId="toggle-active"
+                        className="absolute inset-0 rounded-lg bg-[rgba(168,85,247,0.2)] border border-[rgba(168,85,247,0.3)] shadow-[0_0_15px_rgba(168,85,247,0.15)]"
+                        transition={{ duration: 0.3, ease: "backOut" }}
+                    />
+                )}
+                <Lightbulb className={`w-4 h-4 ${viewData === "explanation" ? "text-[#a855f7]" : "currentColor"}`} />
+                <span className="relative z-10">Explanation</span>
             </button>
         </div>
     );

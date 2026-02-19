@@ -5,7 +5,7 @@ import { X, Palette, MessageSquare, Volume2, Globe, Cpu } from "lucide-react";
 import { useSettings, BgPreset, ResponseLength, VoiceGender, Language, CelestialTheme } from "@/contexts/SettingsContext";
 
 import { playInteractionSound } from "@/utils/audioManager";
-import CreditsTracker from "@/components/CreditsTracker";
+
 
 const BG_PRESETS: { key: BgPreset; name: string; desc: string; colors: string[] }[] = [
     {
@@ -76,8 +76,7 @@ export default function SettingsDrawer({ isOpen, onClose }: SettingsDrawerProps)
                                 </button>
                             </div>
 
-                            {/* ── Credits Tracker ── */}
-                            <CreditsTracker />
+
 
                             {/* ── Background Presets ── */}
                             <section>

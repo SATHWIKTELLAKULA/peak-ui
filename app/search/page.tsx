@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback, Suspense } from "react";
+import { useState, useEffect, useRef, useCallback, Suspense, useMemo } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Script from "next/script";
+import { useChat } from "@ai-sdk/react";
 import {
     ArrowLeft, Sparkles, Search, Loader2, AlertCircle, RefreshCw,
     Settings, Volume2, VolumeX, Pin, PinOff, Copy, Check,
@@ -155,10 +156,44 @@ function SearchResultsContent() {
         }
     }, [isLoggedIn, authLoading, neuralMode]);
 
-    const [answer, setAnswer] = useState("");
-    // Initialize loading to true if there's a query in the URL to prevent "No query" flicker
+    const [isStreaming, setIsStreaming] = useState(false);
+    const [error, setError] = useState("");
+    const [showRateLimit, setShowRateLimit] = useState(false);
+    const [authOpen, setAuthOpen] = useState(false);
+    const [settingsOpen, setSettingsOpen] = useState(false);
+
     const [isLoading, setIsLoading] = useState(() => !!query);
+    const [messages, setMessages] = useState<ChatMessage[]>([]);
+    const [answer, setAnswer] = useState("");
+    const [explanationAnswer, setExplanationAnswer] = useState("");
+
+    // Missing State Re-declarations
+    const [viewMode, setViewMode] = useState<"direct" | "detailed" | "explanation">("detailed");
+    const [directAnswer, setDirectAnswer] = useState("");
+    const [detailedAnswer, setDetailedAnswer] = useState("");
+    const [progress, setProgress] = useState(0);
     const [isMediaLoaded, setIsMediaLoaded] = useState(false);
+    const [followUp, setFollowUp] = useState("");
+    const [followUpLoading, setFollowUpLoading] = useState(false);
+    const chatEndRef = useRef<HTMLDivElement>(null);
+    const [isPinned, setIsPinned] = useState(false);
+    const [isSpeaking, setIsSpeaking] = useState(false);
+    const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+    const voicesRef = useRef<SpeechSynthesisVoice[]>([]);
+    const [isListening, setIsListening] = useState(false);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const recognitionRef = useRef<any>(null);
+    const lastFetchedQuery = useRef<string | null>(null);
+    const abortRef = useRef<AbortController | null>(null);
+    const [followUpAttachment, setFollowUpAttachment] = useState<Attachment | null>(null);
+    const [isUploading, setIsUploading] = useState(false);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+    const [isGrounded, setIsGrounded] = useState(false);
+
+    // Derived State
+    const chatHistory = messages.slice(2);
+
+    /* ── Effects & Helpers ── */
 
     // Reset media loading state when answer changes to a new image/video
     useEffect(() => {
@@ -166,20 +201,6 @@ function SearchResultsContent() {
             setIsMediaLoaded(false);
         }
     }, [answer]);
-
-    const [isStreaming, setIsStreaming] = useState(false);
-    const [error, setError] = useState("");
-    const [showRateLimit, setShowRateLimit] = useState(false);
-    const [authOpen, setAuthOpen] = useState(false);
-    const [settingsOpen, setSettingsOpen] = useState(false);
-
-    /* ── Dual-View State ── */
-    const [viewMode, setViewMode] = useState<"direct" | "detailed">("detailed");
-    const [directAnswer, setDirectAnswer] = useState("");
-    const [detailedAnswer, setDetailedAnswer] = useState("");
-
-    // Video Generation Progress State
-    const [progress, setProgress] = useState(0);
 
     // Reset progress on new search
     useEffect(() => {
@@ -209,34 +230,6 @@ function SearchResultsContent() {
             return () => clearTimeout(timeout);
         }
     }, [isMediaLoaded]);
-
-    // Follow-up chat
-    const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
-    const [followUp, setFollowUp] = useState("");
-    const [followUpLoading, setFollowUpLoading] = useState(false);
-    const chatEndRef = useRef<HTMLDivElement>(null);
-
-    // Pin state
-    const [isPinned, setIsPinned] = useState(false);
-
-    // Voice
-    const [isSpeaking, setIsSpeaking] = useState(false);
-    const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
-    const voicesRef = useRef<SpeechSynthesisVoice[]>([]);
-
-    // Continuous listening
-    const [isListening, setIsListening] = useState(false);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const recognitionRef = useRef<any>(null);
-
-    const lastFetchedQuery = useRef<string | null>(null);
-    const abortRef = useRef<AbortController | null>(null);
-
-    // Multimodal State
-    const [followUpAttachment, setFollowUpAttachment] = useState<Attachment | null>(null);
-    const [isUploading, setIsUploading] = useState(false);
-    const fileInputRef = useRef<HTMLInputElement>(null);
-    const [isGrounded, setIsGrounded] = useState(false);
 
     /* ── Pre-load speech voices ── */
     useEffect(() => {
@@ -307,17 +300,9 @@ function SearchResultsContent() {
         utter.lang = targetLang;
 
         if (voices.length > 0) {
-            // 1. Try exact match for language (e.g., 'te-IN' or 'hi-IN')
             preferredVoice = voices.find(v => v.lang === targetLang);
-
-            // 2. If no exact match for Indian languages, try to find a voice that supports the script or region if possible
-            // Most browsers might not have specific Te/Hi voices, so we fallback gracefully.
-
-            // 3. For English (or fallback), prioritize Indian English ('en-IN') or gender preference
             if (!preferredVoice && (language === 'en' || !language)) {
-                // Try Indian English first for "Peak" identity if available, else standard preference
                 preferredVoice = voices.find(v => v.lang === 'en-IN');
-
                 if (!preferredVoice) {
                     preferredVoice = voices.find((v) => {
                         const name = v.name.toLowerCase();
@@ -328,17 +313,9 @@ function SearchResultsContent() {
                     });
                 }
             }
-
-            // 4. Fallback to any voice for the target language (broad match)
             if (!preferredVoice) {
-                // Broad match for 'te', 'hi', 'en'
                 preferredVoice = voices.find(v => v.lang.startsWith(language === 'te' ? 'te' : language === 'hi' ? 'hi' : 'en'));
             }
-
-            // 5. Final Fallback: If still null, browser might auto-select based on utter.lang, 
-            // but we assign the first available voice as a safety net if it matches broadly, 
-            // or just let the browser decide if we assign nothing (sometimes better). 
-            // However, React refs usually want a value.
             utter.voice = preferredVoice || voices.find(v => v.default) || voices[0];
         }
         utter.onend = () => setIsSpeaking(false);
@@ -430,14 +407,12 @@ function SearchResultsContent() {
         }
     };
 
-
-
-    /* ── Initial search fetch ── */
+    /* ── Fetch Answer (Full Response) ── */
     const fetchAnswer = async (q: string) => {
         if (!q.trim()) return;
 
         // Gate check
-        if (neuralMode !== "flash") {
+        if (neuralMode !== "flash" && !isLoggedIn) {
             if (!supabaseBrowser) {
                 setIsLocked(true);
                 setIsLoading(false);
@@ -456,241 +431,83 @@ function SearchResultsContent() {
 
         window.speechSynthesis?.cancel();
         setIsSpeaking(false);
-        setChatHistory([]);
-
-        const cacheKey = CACHE_PREFIX + q.trim().toLowerCase();
-        try {
-            const cached = sessionStorage.getItem(cacheKey);
-            if (cached && cached.trim().length > 10) { // Simple check to avoid empty/short garbage config
-                try {
-                    const parsed = JSON.parse(cached);
-                    // Ensure we actually have content
-                    if (parsed.detailed_answer || parsed.direct_answer) {
-                        setDirectAnswer(parsed.direct_answer || "");
-                        setDetailedAnswer(parsed.detailed_answer || cached);
-                        setAnswer(parsed.detailed_answer || cached);
-                        setError("");
-                        setIsLoading(false);
-                        setIsStreaming(false);
-                        return;
-                    }
-                } catch {
-                    // unexpected format, ignore
-                }
-            }
-        } catch { /* */ }
-
-        abortRef.current?.abort();
-        const controller = new AbortController();
-        if (!q.trim()) return;
-
-        abortRef.current = controller;
-
-        setIsLoading(true);
-        setIsStreaming(false);
-        setIsMediaLoaded(false); // Reset image state on new search
         setError("");
+
+        // Reset View State
         setAnswer("");
         setDirectAnswer("");
         setDetailedAnswer("");
+        setExplanationAnswer("");
         setViewMode("detailed");
         setIsGrounded(false);
-
-        // Calculate Effective Mode for Backend
-        let effectiveMode = "chat";
-        if (neuralMode === "creative") {
-            if (creativeSubMode === "visualize") effectiveMode = "image";
-            else if (creativeSubMode === "analyze") effectiveMode = "vision";
-            else if (creativeSubMode === "director") effectiveMode = "video";
-        } else {
-            effectiveMode = neuralMode; // flash/pro map to chat in default
-        }
+        setIsMediaLoaded(false);
+        setIsLoading(true);
 
         try {
-            let res;
-            let initialAttachment: Attachment | null = null;
+            const content = q.trim();
+            const response = await fetch("/api/search", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    messages: [{ role: "user", content }],
+                    mode: neuralMode,
+                    lang: language,
+                    quality: videoQuality,
+                    length: responseLength
+                }),
+                signal: abortRef.current?.signal
+            });
 
-            // Check for pending attachment from SearchBar
-            try {
-                const pending = sessionStorage.getItem("peak_pending_attachment");
-                if (pending) {
-                    initialAttachment = JSON.parse(pending);
-                    sessionStorage.removeItem("peak_pending_attachment");
-                }
-            } catch (e) {
-                console.error("Failed to parse attachment", e);
-            }
-
-            if (initialAttachment) {
-                // Construct multimodal request
-                const content = [
-                    { type: "text", text: q },
-                    initialAttachment.type === "image"
-                        ? { type: "image_url", image_url: { url: initialAttachment.base64 } }
-                        : { type: "text", text: `[User uploaded file: ${initialAttachment.url}]` }
-                ];
-
-                res = await fetch("/api/search", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        messages: [{ role: "user", content }],
-                        length: responseLength,
-                        mode: effectiveMode,
-                        lang: language,
-                        quality: videoQuality
-                    }),
-                    signal: controller.signal,
-                });
-            } else {
-                res = await fetch(`/api/search?q=${encodeURIComponent(q)}&length=${responseLength}&mode=${effectiveMode}&lang=${language}&quality=${videoQuality}`, {
-                    signal: controller.signal,
-                });
-            }
-
-            if (res.status === 429) {
+            if (response.status === 429) {
                 setShowRateLimit(true);
-                setError("Server cooling down. Rate limit reached.");
-                return;
+                throw new Error("Rate limit reached");
             }
 
-            if (!res.ok) {
-                const contentType = res.headers.get("content-type") || "";
-                if (contentType.includes("application/json")) {
-                    const data = await res.json();
-                    throw new Error(data.error || `Server Error: ${res.status}`);
-                }
-                throw new Error(`Connection Failed: ${res.status}`);
-            }
+            if (!response.ok) throw new Error("Network response was not ok");
 
-            const reader = res.body?.getReader();
-            if (!reader) throw new Error("Stream not supported by browser.");
+            const data = await response.json();
+            const fullText = data.text || "";
 
-            const decoder = new TextDecoder("utf-8");
-            let accumulated = "";
-            let firstChunkReceived = false;
-            // Removed: setIsLoading(false) here to prevent flicker
+            setAnswer(fullText);
 
-            setIsStreaming(true);
+            // Process Answer sections
+            if (fullText.includes("[DETAILED]")) {
+                const parts = fullText.split("[DETAILED]");
+                const quickPart = parts[0].replace(/\[QUICK\]/g, "").trim();
+                let remainingPart = parts[1];
 
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                const chunk = decoder.decode(value, { stream: true });
-                accumulated += chunk;
-
-                if (!firstChunkReceived && accumulated.trim().length > 0) {
-                    setIsLoading(false); // Only stop loading when we actually have content
-                    firstChunkReceived = true;
-                }
-
-                // Check if response is likely JSON (starts with {)
-                const isJson = accumulated.trim().startsWith("{");
-
-                if (!isJson) {
-                    // Raw Text Stream (Flash Mode)
-                    setAnswer(accumulated);
-                    setDetailedAnswer(accumulated);
+                if (remainingPart.includes("[EXPLANATION]")) {
+                    const explParts = remainingPart.split("[EXPLANATION]");
+                    setDetailedAnswer(explParts[0].trim());
+                    setExplanationAnswer(explParts[1].trim());
                 } else {
-                    // JSON Stream parsing
-                    const directMatch = accumulated.match(/"direct_answer":\s*"([\s\S]*?)(?:"|$)/);
-                    const detailedMatch = accumulated.match(/"detailed_answer":\s*"([\s\S]*?)(?:"|$)/);
-                    const clean = (s: string) => s.replace(/\\n/g, "\n").replace(/\\"/g, '"').replace(/\\\\/g, "\\");
-
-                    if (directMatch && directMatch[1]) {
-                        setDirectAnswer(clean(directMatch[1]));
-                    }
-                    if (detailedMatch && detailedMatch[1]) {
-                        const val = clean(detailedMatch[1]);
-                        setDetailedAnswer(val);
-                        setAnswer(val); // Keep answer in sync
-                    }
+                    setDetailedAnswer(remainingPart.trim());
+                    setExplanationAnswer("");
                 }
-
-                // If we have any content update, allow streaming UI
-                if (accumulated.length > 5) {
-                    // Ensure loading is off if we are processing data (safety)
-                    if (isLoading) setIsLoading(false);
-                }
+                setDirectAnswer(quickPart);
+            } else {
+                setDirectAnswer(fullText.replace("[QUICK]", "").trim().slice(0, 200) + "...");
+                setDetailedAnswer(fullText);
+                setExplanationAnswer("");
             }
 
-            // Final verification and splitting
-            try {
-                let fullContent = accumulated;
-                let isJson = false;
-                let grounded = false;
+            // Update Messages History
+            setMessages(prev => [
+                ...prev,
+                { role: 'user', content },
+                { role: 'assistant', content: fullText }
+            ]);
 
-                // 1. Try to extract content from JSON wrapper if present
-                try {
-                    const finalJson = JSON.parse(accumulated);
-                    fullContent = finalJson.detailed_answer || finalJson.answer || accumulated;
-                    grounded = finalJson.is_grounded || false;
-                    isJson = true;
-                } catch (e) {
-                    // Raw text stream
-                }
-
-                // 2. Parse the content for separators
-                if (fullContent.includes("[DETAILED]")) {
-                    const parts = fullContent.split("[DETAILED]");
-                    // Remove [QUICK] tag and any leading info from the first part
-                    let quickPart = parts[0].replace(/\[QUICK\]/g, "").trim();
-                    let detailedPart = parts[1].trim();
-
-                    // Fallback check
-                    if (!detailedPart) detailedPart = quickPart;
-
-                    setDirectAnswer(quickPart);
-                    setDetailedAnswer(detailedPart);
-                    setAnswer(detailedPart);
-                    setIsGrounded(grounded);
-                } else {
-                    // No tags found - Fallback to standard behavior
-                    if (isJson) {
-                        const finalJson = JSON.parse(accumulated);
-                        setDirectAnswer(finalJson.direct_answer || fullContent.slice(0, 200) + "...");
-                        setDetailedAnswer(fullContent);
-                        setAnswer(fullContent);
-                        setIsGrounded(grounded);
-                    } else {
-                        setDirectAnswer(fullContent.slice(0, 200) + "...");
-                        setDetailedAnswer(fullContent);
-                        setAnswer(fullContent);
-                    }
-                }
-            } catch (e) {
-                console.error("Parsing error:", e);
-                // Last ditch fallback
-                setAnswer(accumulated);
-                setDetailedAnswer(accumulated);
-            }
-
-            try {
-                if (accumulated.length > 20) {
-                    sessionStorage.setItem(cacheKey, accumulated);
-                }
-            } catch { /* */ }
             incrementSearchCount();
 
-            if (supabaseBrowser) {
-                // Ensure authenticated before trying to save history
-                const { data: { session } } = await supabaseBrowser.auth.getSession();
-                if (session?.user) {
-                    supabaseBrowser
-                        .from("search_history")
-                        .insert({ query: q.trim(), answer: accumulated, user_id: session.user.id })
-                        .then(({ error }) => {
-                            if (error) console.warn("Failed to save history:", error.message);
-                        });
-                }
+        } catch (err: any) {
+            if (err.name !== 'AbortError') {
+                setError("Peak AI is currently refining your search. Please try again.");
+                console.error(err);
             }
-        } catch (err: unknown) {
-            if (err instanceof Error && err.name === "AbortError") return;
-            setError("Peak AI is currently refining your search. Please wait 5 seconds.");
         } finally {
-            import("@/utils/audioManager").then(m => m.stopHum());
             setIsLoading(false);
-            setIsStreaming(false);
+            import("@/utils/audioManager").then(m => m.stopHum());
         }
     };
 
@@ -701,19 +518,16 @@ function SearchResultsContent() {
         }
         lastFetchedQuery.current = query;
         fetchAnswer(query);
+
         return () => {
             abortRef.current?.abort();
             lastFetchedQuery.current = null;
         };
     }, [query]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    // Start/Stop Hum based on loading state (handled in fetchAnswer usually, but useEffect is safer for state sync)
     useEffect(() => {
-        // We handle startHum in fetchAnswer to be precise with timing, but cleanup here
         return () => { import("@/utils/audioManager").then(m => m.stopHum()); };
     }, []);
-
-
 
     const handleManualRetry = () => {
         lastFetchedQuery.current = null;
@@ -721,78 +535,93 @@ function SearchResultsContent() {
         fetchAnswer(query);
     };
 
-    /* ── Follow-up conversation ── */
     const handleFollowUpSubmit = async (overrideText?: string) => {
         const text = overrideText || followUp;
-        if ((!text.trim() && !followUpAttachment) || followUpLoading) return;
+        if ((!text.trim() && !followUpAttachment)) return;
 
-        let userContent: any = text.trim();
+        setFollowUp("");
+        let content = text.trim();
         if (followUpAttachment) {
-            userContent = [
-                { type: "text", text: text.trim() },
-                followUpAttachment.type === "image"
-                    ? { type: "image_url", image_url: { url: followUpAttachment.base64 } }
-                    : { type: "text", text: `[User file: ${followUpAttachment.url}]` }
-            ];
+            content += `\n\n[Attached File: ${followUpAttachment.url}]`;
+            setFollowUpAttachment(null);
         }
 
-        const userMsg: ChatMessage = { role: "user", content: userContent };
-        const history: ChatMessage[] = [
-            { role: "user", content: query },
-            { role: "assistant", content: answer },
-            ...chatHistory,
-            userMsg,
-        ];
-
-        setChatHistory((prev) => [...prev, userMsg]);
-        setFollowUp("");
-        setFollowUpAttachment(null);
+        const newUserMsg: ChatMessage = { role: 'user', content };
+        const updatedMessages = [...messages, newUserMsg];
+        setMessages(updatedMessages);
         setFollowUpLoading(true);
 
         try {
-            const res = await fetch("/api/search", {
+            const response = await fetch("/api/search", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ messages: history, length: responseLength, mode: neuralMode, lang: language }),
+                body: JSON.stringify({
+                    messages: updatedMessages,
+                    mode: neuralMode,
+                    lang: language,
+                    quality: videoQuality,
+                    length: responseLength
+                }),
             });
 
-            if (!res.ok) {
-                setChatHistory((prev) => [...prev, { role: "assistant", content: "Failed to get response. Try again." }]);
-                return;
-            }
+            if (!response.ok) throw new Error("Network response was not ok");
+            const data = await response.json();
+            const fullText = data.text || "";
 
-            const reader = res.body?.getReader();
-            if (!reader) return;
+            setMessages(prev => [...prev, { role: 'assistant', content: fullText }]);
+            incrementSearchCount();
 
-            const decoder = new TextDecoder("utf-8");
-            let accumulated = "";
-            const assistantIdx = chatHistory.length + 1; // +1 for userMsg
+            setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
 
-            setChatHistory((prev) => [...prev, { role: "assistant", content: "" }]);
-
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                accumulated += decoder.decode(value, { stream: true });
-
-                // Extract detailed answer for history
-                const detailedMatch = accumulated.match(/"detailed_answer":\s*"([\s\S]*?)(?:"|$)/);
-                const clean = (s: string) => s.replace(/\\n/g, "\n").replace(/\\"/g, '"').replace(/\\\\/g, "\\");
-                const content = (detailedMatch && detailedMatch[1]) ? clean(detailedMatch[1]) : accumulated;
-
-                setChatHistory((prev) => {
-                    const updated = [...prev];
-                    updated[assistantIdx] = { role: "assistant", content };
-                    return updated;
-                });
-            }
-        } catch {
-            setChatHistory((prev) => [...prev, { role: "assistant", content: "Network error." }]);
+        } catch (err) {
+            console.error(err);
         } finally {
             setFollowUpLoading(false);
-            setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
         }
     };
+
+    // Memoize markdown components to prevent re-rendering flashing (Jumpy fix)
+    const markdownComponents = useMemo(() => ({
+        p: ({ children }: any) => (
+            <p className="animate-fade-in-text mb-4 last:mb-0 leading-relaxed text-[rgba(238,238,255,0.7)]">
+                {children}
+            </p>
+        ),
+        li: ({ children }: any) => (
+            <li className="animate-fade-in-text mb-2 last:mb-0 text-[rgba(238,238,255,0.7)]">
+                {children}
+            </li>
+        ),
+        h1: ({ children }: any) => (
+            <h1 className="animate-fade-in-text text-2xl font-bold mb-4 mt-6 text-[#eeeeff] first:mt-0 font-orbitron tracking-wide">
+                {children}
+            </h1>
+        ),
+        h2: ({ children }: any) => (
+            <h2 className="animate-fade-in-text text-xl font-semibold mb-3 mt-5 text-[#eeeeff] border-b border-white/5 pb-2">
+                {children}
+            </h2>
+        ),
+        h3: ({ children }: any) => (
+            <h3 className="animate-fade-in-text text-lg font-medium mb-2 mt-4 text-[rgba(238,238,255,0.9)]">
+                {children}
+            </h3>
+        ),
+        code({ className, children, ...props }: any) {
+            const isBlock = className?.startsWith("language-") || String(children).includes("\n");
+            if (isBlock) {
+                return (
+                    <div className="animate-fade-in-text my-4 rounded-xl overflow-hidden border border-white/10 shadow-lg">
+                        <CodeBlock className={className}>{String(children).replace(/\n$/, "")}</CodeBlock>
+                    </div>
+                );
+            }
+            return <code className={`${className} bg-white/10 px-1.5 py-0.5 rounded text-[#a855f7] text-sm font-mono`} {...props}>{children}</code>;
+        },
+        a({ href, children }: any) {
+            return <a href={href} target="_blank" rel="noopener noreferrer" className="text-[#4f8fff] hover:text-[#8b5cf6] underline underline-offset-4 transition-colors">{children}</a>;
+        },
+    }), []);
 
     const showContent = answer && !isLoading;
     // Only show empty message if we have NO query, or if we have a query but finished loading with no result/error
@@ -996,9 +825,9 @@ function SearchResultsContent() {
                                             {showContent && (
                                                 <motion.div key="answer-container"
                                                     layout
-                                                    initial={{ opacity: 0, y: 20 }}
-                                                    animate={{ opacity: 1, y: 0 }}
-                                                    transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
+                                                    initial={{ opacity: 0, scale: 0.95 }}
+                                                    animate={{ opacity: 1, scale: 1 }}
+                                                    transition={{ duration: 0.8, ease: "easeOut" }}
                                                     className="w-full"
                                                 >
                                                     {/* Toggle Switcher & Actions */}
@@ -1132,79 +961,13 @@ function SearchResultsContent() {
                                                                 <ReactMarkdown
                                                                     remarkPlugins={[remarkMath, remarkGfm]}
                                                                     rehypePlugins={[rehypeKatex]}
-                                                                    components={{
-                                                                        p: ({ children }) => (
-                                                                            <motion.p
-                                                                                initial="hidden"
-                                                                                whileInView="visible"
-                                                                                viewport={{ once: true, margin: "-10% 0px" }}
-                                                                                variants={scrollyVariants}
-                                                                            >
-                                                                                {children}
-                                                                            </motion.p>
-                                                                        ),
-                                                                        li: ({ children }) => (
-                                                                            <motion.li
-                                                                                initial="hidden"
-                                                                                whileInView="visible"
-                                                                                viewport={{ once: true, margin: "-10% 0px" }}
-                                                                                variants={scrollyVariants}
-                                                                            >
-                                                                                {children}
-                                                                            </motion.li>
-                                                                        ),
-                                                                        h1: ({ children }) => (
-                                                                            <motion.h1
-                                                                                initial="hidden"
-                                                                                whileInView="visible"
-                                                                                viewport={{ once: true, margin: "-10% 0px" }}
-                                                                                variants={scrollyVariants}
-                                                                            >
-                                                                                {children}
-                                                                            </motion.h1>
-                                                                        ),
-                                                                        h2: ({ children }) => (
-                                                                            <motion.h2
-                                                                                initial="hidden"
-                                                                                whileInView="visible"
-                                                                                viewport={{ once: true, margin: "-10% 0px" }}
-                                                                                variants={scrollyVariants}
-                                                                            >
-                                                                                {children}
-                                                                            </motion.h2>
-                                                                        ),
-                                                                        h3: ({ children }) => (
-                                                                            <motion.h3
-                                                                                initial="hidden"
-                                                                                whileInView="visible"
-                                                                                viewport={{ once: true, margin: "-10% 0px" }}
-                                                                                variants={scrollyVariants}
-                                                                            >
-                                                                                {children}
-                                                                            </motion.h3>
-                                                                        ),
-                                                                        code({ className, children, ...props }) {
-                                                                            const isBlock = className?.startsWith("language-") || String(children).includes("\n");
-                                                                            if (isBlock) {
-                                                                                return (
-                                                                                    <motion.div
-                                                                                        initial="hidden"
-                                                                                        whileInView="visible"
-                                                                                        viewport={{ once: true, margin: "-10% 0px" }}
-                                                                                        variants={scrollyVariants}
-                                                                                    >
-                                                                                        <CodeBlock className={className}>{String(children).replace(/\n$/, "")}</CodeBlock>
-                                                                                    </motion.div>
-                                                                                );
-                                                                            }
-                                                                            return <code className={className} {...props}>{children}</code>;
-                                                                        },
-                                                                        a({ href, children }) {
-                                                                            return <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>;
-                                                                        },
-                                                                    }}
+                                                                    components={markdownComponents}
                                                                 >
-                                                                    {viewMode === "detailed" ? detailedAnswer : directAnswer}
+                                                                    {viewMode === "direct"
+                                                                        ? directAnswer
+                                                                        : viewMode === "explanation"
+                                                                            ? explanationAnswer
+                                                                            : detailedAnswer}
                                                                 </ReactMarkdown>
                                                             </motion.div>
                                                         )}
@@ -1214,7 +977,7 @@ function SearchResultsContent() {
                                         </AnimatePresence>
 
                                         {isStreaming && (
-                                            <span className="inline-block w-0.5 h-5 bg-[#8b5cf6] animate-pulse ml-0.5 align-middle" />
+                                            <span className="animate-cursor-blink ml-0.5 align-middle" />
                                         )}
 
                                         {!isLoading && !answer && !error && !query && (
@@ -1407,10 +1170,11 @@ function SearchResultsContent() {
 
                             {/* ===== Entities Sidebar ===== */}
                             {showContent && <EntitiesSidebar answer={answer} />}
-                        </motion.div>
+                        </motion.div >
 
                     </>
-                )}
+                )
+                }
 
                 {/* ===== Footer ===== */}
                 <motion.footer className="mt-auto pt-12 pb-8 flex flex-col items-center gap-2 text-center"
@@ -1423,10 +1187,10 @@ function SearchResultsContent() {
                         Data from Groq AI. Peak AI ensures privacy but answers may contain inaccuracies.
                     </p>
                 </motion.footer>
-            </motion.main>
+            </motion.main >
 
             {/* Google Programmable Search Engine Implementation */}
-            <Script
+            < Script
                 src="https://cse.google.com/cse.js?cx=e5ec2e7bcf3e64e49"
                 strategy="afterInteractive"
             />

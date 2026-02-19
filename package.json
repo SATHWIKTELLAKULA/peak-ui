@@ -9,11 +9,14 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@ai-sdk/openai": "^3.0.30",
+    "@ai-sdk/react": "^3.0.93",
     "@google/generative-ai": "^0.24.1",
     "@heyputer/puter.js": "^2.2.10",
     "@react-three/drei": "^10.7.7",
     "@react-three/fiber": "^9.5.0",
     "@supabase/supabase-js": "^2.95.3",
+    "ai": "^6.0.91",
     "bytez.js": "^3.0.0",
     "framer-motion": "^12.34.0",
     "groq-sdk": "^0.37.0",
@@ -26,7 +29,8 @@
     "rehype-katex": "^7.0.1",
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
-    "three": "^0.182.0"
+    "three": "^0.182.0",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

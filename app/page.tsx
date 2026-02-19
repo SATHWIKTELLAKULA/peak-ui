@@ -116,13 +116,26 @@ export default function Home() {
     const fetchHistory = async () => {
       try {
         const { data, error } = await supabaseBrowser!
-          .from("search_history")
+          .from("searches")
           .select("id, query, answer, created_at")
           .order("created_at", { ascending: false })
-          .limit(5);
+          .limit(50);
 
         if (data && !error) {
-          setRecentSearches(data);
+          // Client-side unique filter
+          const uniqueMap = new Map();
+          const uniqueList: HistoryItem[] = [];
+
+          for (const item of data) {
+            const normalizedQuery = item.query.trim().toLowerCase();
+            if (!uniqueMap.has(normalizedQuery)) {
+              uniqueMap.set(normalizedQuery, true);
+              uniqueList.push(item);
+            }
+            if (uniqueList.length >= 5) break;
+          }
+
+          setRecentSearches(uniqueList);
         }
       } catch { }
       setHistoryLoading(false);
@@ -333,14 +346,14 @@ export default function Home() {
             animate="visible"
             variants={staggerContainer}
           >
-            <motion.div custom={0} variants={fadeUp} className="flex items-center gap-2 mb-4 px-2">
+            <motion.div custom={0} variants={fadeUp} className="flex items-center gap-2 mb-4 px-2 justify-center">
               <Clock className="w-4 h-4 text-[rgba(238,238,255,0.25)]" />
               <h2 className="text-sm font-semibold text-[rgba(238,238,255,0.35)] tracking-wide uppercase">
                 Recent Intelligence
               </h2>
             </motion.div>
 
-            <div className="space-y-2">
+            <div className="flex gap-3 overflow-x-auto pb-4 px-2 scrollbar-hide mask-fade-sides justify-start sm:justify-center">
               {recentSearches.map((item, idx) => (
                 <motion.button
                   key={item.id}
@@ -352,36 +365,27 @@ export default function Home() {
                     router.push(`/search?q=${encodeURIComponent(item.query)}`)
                   }
                   className="
-                    w-full group
-                    flex items-center gap-4
-                    px-5 py-3.5
-                    rounded-2xl
-                    bg-[rgba(255,255,255,0.02)]
-                    border border-[rgba(255,255,255,0.04)]
+                    flex-shrink-0 group
+                    flex items-center gap-3
+                    px-5 py-2.5
+                    rounded-full
+                    bg-[rgba(255,255,255,0.03)]
+                    border border-[rgba(255,255,255,0.06)]
                     backdrop-blur-xl
-                    hover:bg-[rgba(255,255,255,0.05)]
-                    hover:border-[rgba(139,92,246,0.2)]
+                    hover:bg-[rgba(168,85,247,0.1)]
+                    hover:border-[rgba(168,85,247,0.3)]
+                    hover:shadow-[0_0_15px_rgba(168,85,247,0.15)]
                     transition-all duration-300
-                    text-left
                     cursor-pointer
+                    max-w-[200px]
                   "
-                  whileHover={{ scale: 1.01 }}
-                  whileTap={{ scale: 0.99 }}
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
                 >
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm text-[#eeeeff] font-medium truncate group-hover:text-white transition-colors">
-                      {item.query}
-                    </p>
-                    <p className="text-xs text-[rgba(238,238,255,0.2)] mt-0.5 truncate">
-                      {item.answer.slice(0, 80)}…
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    <span className="text-[10px] text-[rgba(238,238,255,0.15)] whitespace-nowrap">
-                      {timeAgo(item.created_at)}
-                    </span>
-                    <ArrowRight className="w-3.5 h-3.5 text-[rgba(238,238,255,0.1)] group-hover:text-[#8b5cf6] group-hover:translate-x-0.5 transition-all duration-300" />
-                  </div>
+                  <span className="text-sm text-[#eeeeff] font-medium truncate">
+                    {item.query}
+                  </span>
+                  <ArrowRight className="w-3 h-3 text-[rgba(238,238,255,0.2)] group-hover:text-[#a855f7] -ml-1 group-hover:translate-x-0.5 transition-all duration-300" />
                 </motion.button>
               ))}
             </div>

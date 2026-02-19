@@ -477,3 +477,45 @@ body {
   border: 1px solid rgba(0, 255, 255, 0.5);
   box-shadow: 2px 0 10px rgba(0, 255, 255, 0.3);
 }
+
+/* ===== Blinking Cursor ===== */
+@keyframes cursorBlink {
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0;
+  }
+}
+
+.animate-cursor-blink {
+  animation: cursorBlink 0.8s step-end infinite;
+  display: inline-block;
+  width: 8px;
+  height: 18px;
+  background-color: var(--neon-violet);
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  box-shadow: 0 0 8px var(--neon-violet);
+}
+
+@keyframes warmFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+    filter: blur(2px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+}
+
+.animate-fade-in-text {
+  animation: warmFadeIn 0.4s ease-out forwards;
+}
