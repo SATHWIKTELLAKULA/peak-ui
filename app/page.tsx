@@ -367,7 +367,7 @@ export default function Home() {
                   className="
                     flex-shrink-0 group
                     flex items-center gap-3
-                    px-5 py-2.5
+                    px-5 py-3 min-h-[44px]
                     rounded-full
                     bg-[rgba(255,255,255,0.03)]
                     border border-[rgba(255,255,255,0.06)]

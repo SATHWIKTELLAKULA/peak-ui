@@ -24,17 +24,18 @@ const orbitron = Orbitron({
 });
 
 export const metadata: Metadata = {
-  title: "PEAK AI — Designed by Sathwik",
+  metadataBase: new URL("https://peakengine.vercel.app"),
+  title: "Peak AI — Designed by Sathwik Tellakula",
   description:
-    "Experience the future of search. AI-powered answers, blazing fast, completely free.",
-  keywords: ["search engine", "AI search", "Peak", "free search", "Sathwik"],
+    "Peak AI: An advanced intelligence engine. Get real-time, AI-powered answers instantly.",
+  keywords: ["search engine", "AI search", "Peak", "free search", "Sathwik Tellakula"],
   icons: {
     icon: "/icon.png",
     apple: "/icon.png",
   },
   openGraph: {
-    title: "PEAK AI — Designed by Sathwik",
-    description: "Experience the future of search. AI-powered answers, blazing fast, completely free.",
+    title: "Peak AI — Designed by Sathwik Tellakula",
+    description: "Peak AI: An advanced intelligence engine. Get real-time, AI-powered answers instantly.",
     type: "website",
     images: [{ url: "/api/og", width: 1200, height: 630 }],
   },

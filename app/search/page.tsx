@@ -583,27 +583,27 @@ function SearchResultsContent() {
     // Memoize markdown components to prevent re-rendering flashing (Jumpy fix)
     const markdownComponents = useMemo(() => ({
         p: ({ children }: any) => (
-            <p className="animate-fade-in-text mb-4 last:mb-0 leading-relaxed text-[rgba(238,238,255,0.7)]">
+            <p className="animate-fade-in-text mb-4 last:mb-0 leading-relaxed text-[rgba(238,238,255,0.7)] text-sm md:text-base">
                 {children}
             </p>
         ),
         li: ({ children }: any) => (
-            <li className="animate-fade-in-text mb-2 last:mb-0 text-[rgba(238,238,255,0.7)]">
+            <li className="animate-fade-in-text mb-2 last:mb-0 text-[rgba(238,238,255,0.7)] text-sm md:text-base">
                 {children}
             </li>
         ),
         h1: ({ children }: any) => (
-            <h1 className="animate-fade-in-text text-2xl font-bold mb-4 mt-6 text-[#eeeeff] first:mt-0 font-orbitron tracking-wide">
+            <h1 className="animate-fade-in-text text-xl md:text-2xl font-bold mb-4 mt-6 text-[#eeeeff] first:mt-0 font-orbitron tracking-wide">
                 {children}
             </h1>
         ),
         h2: ({ children }: any) => (
-            <h2 className="animate-fade-in-text text-xl font-semibold mb-3 mt-5 text-[#eeeeff] border-b border-white/5 pb-2">
+            <h2 className="animate-fade-in-text text-lg md:text-xl font-semibold mb-3 mt-5 text-[#eeeeff] border-b border-white/5 pb-2">
                 {children}
             </h2>
         ),
         h3: ({ children }: any) => (
-            <h3 className="animate-fade-in-text text-lg font-medium mb-2 mt-4 text-[rgba(238,238,255,0.9)]">
+            <h3 className="animate-fade-in-text text-base md:text-lg font-medium mb-2 mt-4 text-[rgba(238,238,255,0.9)]">
                 {children}
             </h3>
         ),
@@ -869,78 +869,96 @@ function SearchResultsContent() {
                                                     {/* Sliding Content */}
                                                     <AnimatePresence mode="wait">
                                                         {answer.startsWith("IMAGE_DATA:") ? (
-                                                            <div className="flex justify-center w-full relative min-h-[300px]">
-                                                                {/* Shimmer / Skeleton Loader */}
-                                                                <AnimatePresence>
-                                                                    {!isMediaLoaded && (
-                                                                        <motion.div
-                                                                            key="img-skeleton"
-                                                                            initial={{ opacity: 0 }}
-                                                                            animate={{ opacity: 1 }}
-                                                                            exit={{ opacity: 0 }}
-                                                                            className="absolute inset-0 w-full max-w-2xl mx-auto rounded-xl overflow-hidden bg-[rgba(255,255,255,0.05)] border border-white/10"
-                                                                        >
-                                                                            <div className="absolute inset-0 -translate-x-full animate-[shimmer_1.5s_infinite] bg-gradient-to-r from-transparent via-white/10 to-transparent" />
-                                                                            <div className="absolute inset-0 flex items-center justify-center">
-                                                                                <Loader2 className="w-8 h-8 text-[#8b5cf6] animate-spin opacity-50" />
-                                                                            </div>
-                                                                        </motion.div>
-                                                                    )}
-                                                                </AnimatePresence>
+                                                            <motion.div
+                                                                key="image-result"
+                                                                initial={{ opacity: 0, scale: 0.9 }}
+                                                                animate={{ opacity: 1, scale: 1 }}
+                                                                exit={{ opacity: 0, scale: 0.95 }}
+                                                                transition={{ duration: 0.6, ease: "easeOut" }}
+                                                                className="w-full max-w-2xl mx-auto rounded-2xl p-3 bg-white/5 backdrop-blur-xl border border-white/15 shadow-2xl"
+                                                            >
+                                                                <div className="flex justify-center w-full relative min-h-[300px]">
+                                                                    {/* Shimmer / Skeleton Loader */}
+                                                                    <AnimatePresence>
+                                                                        {!isMediaLoaded && (
+                                                                            <motion.div
+                                                                                key="img-skeleton"
+                                                                                initial={{ opacity: 0 }}
+                                                                                animate={{ opacity: 1 }}
+                                                                                exit={{ opacity: 0 }}
+                                                                                className="absolute inset-0 w-full rounded-xl overflow-hidden bg-[rgba(255,255,255,0.05)] border border-white/10"
+                                                                            >
+                                                                                <div className="absolute inset-0 -translate-x-full animate-[shimmer_1.5s_infinite] bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+                                                                                <div className="absolute inset-0 flex items-center justify-center">
+                                                                                    <Loader2 className="w-8 h-8 text-[#8b5cf6] animate-spin opacity-50" />
+                                                                                </div>
+                                                                            </motion.div>
+                                                                        )}
+                                                                    </AnimatePresence>
 
-                                                                {/* Image */}
-                                                                <motion.img
-                                                                    src={answer.replace("IMAGE_DATA:", "")}
-                                                                    alt="Generated Visualization"
-                                                                    onLoad={() => setIsMediaLoaded(true)}
-                                                                    initial={{ opacity: 0, scale: 0.95 }}
-                                                                    animate={{
-                                                                        opacity: isMediaLoaded ? 1 : 0,
-                                                                        scale: isMediaLoaded ? 1 : 0.95
-                                                                    }}
-                                                                    transition={{ duration: 0.5, ease: "easeOut" }}
-                                                                    className="rounded-xl shadow-2xl border border-white/10 w-full max-w-2xl object-cover relative z-10"
-                                                                />
-                                                            </div>
+                                                                    {/* Image */}
+                                                                    <motion.img
+                                                                        src={answer.replace("IMAGE_DATA:", "")}
+                                                                        alt="Generated Visualization"
+                                                                        onLoad={() => setIsMediaLoaded(true)}
+                                                                        initial={{ opacity: 0, scale: 0.95 }}
+                                                                        animate={{
+                                                                            opacity: isMediaLoaded ? 1 : 0,
+                                                                            scale: isMediaLoaded ? 1 : 0.95
+                                                                        }}
+                                                                        transition={{ duration: 0.5, ease: "easeOut" }}
+                                                                        className="rounded-xl w-full h-auto object-cover relative z-10"
+                                                                    />
+                                                                </div>
+                                                            </motion.div>
                                                         ) : answer.startsWith("VIDEO_DATA:") ? (
-                                                            <div className="flex justify-center w-full relative min-h-[300px]">
-                                                                {/* Video Shimmer */}
-                                                                <AnimatePresence>
-                                                                    {!isMediaLoaded && (
-                                                                        <motion.div
-                                                                            key="vid-skeleton"
-                                                                            initial={{ opacity: 0 }}
-                                                                            animate={{ opacity: 1 }}
-                                                                            exit={{ opacity: 0 }}
-                                                                            className="absolute inset-0 w-full max-w-2xl mx-auto rounded-xl overflow-hidden bg-[rgba(255,255,255,0.05)] border border-white/10"
-                                                                        >
-                                                                            <div className="absolute inset-0 -translate-x-full animate-[shimmer_1.5s_infinite] bg-gradient-to-r from-transparent via-white/10 to-transparent" />
-                                                                            <div className="absolute inset-0 flex items-center justify-center flex-col gap-2">
-                                                                                <Loader2 className="w-8 h-8 text-[#8b5cf6] animate-spin opacity-50" />
-                                                                                <span className="text-xs text-[#8b5cf6]/50 tracking-widest uppercase">Rendering Scene...</span>
-                                                                            </div>
-                                                                        </motion.div>
-                                                                    )}
-                                                                </AnimatePresence>
+                                                            <motion.div
+                                                                key="video-result"
+                                                                initial={{ opacity: 0, scale: 0.9 }}
+                                                                animate={{ opacity: 1, scale: 1 }}
+                                                                exit={{ opacity: 0, scale: 0.95 }}
+                                                                transition={{ duration: 0.6, ease: "easeOut" }}
+                                                                className="w-full max-w-2xl mx-auto rounded-2xl p-3 bg-white/5 backdrop-blur-xl border border-white/15 shadow-2xl"
+                                                            >
+                                                                <div className="flex justify-center w-full relative min-h-[300px]">
+                                                                    {/* Video Shimmer */}
+                                                                    <AnimatePresence>
+                                                                        {!isMediaLoaded && (
+                                                                            <motion.div
+                                                                                key="vid-skeleton"
+                                                                                initial={{ opacity: 0 }}
+                                                                                animate={{ opacity: 1 }}
+                                                                                exit={{ opacity: 0 }}
+                                                                                className="absolute inset-0 w-full rounded-xl overflow-hidden bg-[rgba(255,255,255,0.05)] border border-white/10"
+                                                                            >
+                                                                                <div className="absolute inset-0 -translate-x-full animate-[shimmer_1.5s_infinite] bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+                                                                                <div className="absolute inset-0 flex items-center justify-center flex-col gap-2">
+                                                                                    <Loader2 className="w-8 h-8 text-[#8b5cf6] animate-spin opacity-50" />
+                                                                                    <span className="text-xs text-[#8b5cf6]/50 tracking-widest uppercase">Rendering Scene...</span>
+                                                                                </div>
+                                                                            </motion.div>
+                                                                        )}
+                                                                    </AnimatePresence>
 
-                                                                {/* Video */}
-                                                                <motion.video
-                                                                    src={answer.replace("VIDEO_DATA:", "")}
-                                                                    controls
-                                                                    autoPlay
-                                                                    loop
-                                                                    muted
-                                                                    onLoadedData={() => setIsMediaLoaded(true)}
-                                                                    onCanPlayThrough={() => setIsMediaLoaded(true)}
-                                                                    initial={{ opacity: 0, scale: 0.95 }}
-                                                                    animate={{
-                                                                        opacity: isMediaLoaded ? 1 : 0,
-                                                                        scale: isMediaLoaded ? 1 : 0.95
-                                                                    }}
-                                                                    transition={{ duration: 0.5, ease: "easeOut" }}
-                                                                    className="rounded-xl shadow-2xl border border-white/10 w-full max-w-2xl object-cover relative z-10"
-                                                                />
-                                                            </div>
+                                                                    {/* Video */}
+                                                                    <motion.video
+                                                                        src={answer.replace("VIDEO_DATA:", "")}
+                                                                        controls
+                                                                        autoPlay
+                                                                        loop
+                                                                        muted
+                                                                        onLoadedData={() => setIsMediaLoaded(true)}
+                                                                        onCanPlayThrough={() => setIsMediaLoaded(true)}
+                                                                        initial={{ opacity: 0, scale: 0.95 }}
+                                                                        animate={{
+                                                                            opacity: isMediaLoaded ? 1 : 0,
+                                                                            scale: isMediaLoaded ? 1 : 0.95
+                                                                        }}
+                                                                        transition={{ duration: 0.5, ease: "easeOut" }}
+                                                                        className="rounded-xl w-full h-auto object-cover relative z-10"
+                                                                    />
+                                                                </div>
+                                                            </motion.div>
                                                         ) : (
                                                             <motion.div
                                                                 key={viewMode}

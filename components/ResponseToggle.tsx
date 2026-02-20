@@ -10,13 +10,13 @@ interface ResponseToggleProps {
 
 export default function ResponseToggle({ viewData, onChange }: ResponseToggleProps) {
     return (
-        <div className="flex items-center gap-1 p-1 rounded-xl bg-[rgba(255,255,255,0.03)] border border-[rgba(255,255,255,0.06)] backdrop-blur-md mb-6 w-fit mx-auto">
+        <div className="flex items-center gap-1 p-1 rounded-xl bg-[rgba(255,255,255,0.03)] border border-[rgba(255,255,255,0.06)] backdrop-blur-md mb-6 w-full max-w-full overflow-x-auto scrollbar-hide md:w-fit md:overflow-visible mx-auto flex-nowrap">
             {/* Quick/Direct Tab */}
             <button
                 onClick={() => onChange("direct")}
                 className={`
-                    relative flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium
-                    transition-all duration-300 z-10
+                    relative flex items-center gap-2 px-4 py-2 min-h-[44px] rounded-lg text-xs md:text-sm font-medium
+                    transition-all duration-300 z-10 flex-shrink-0 whitespace-nowrap
                     ${viewData === "direct" ? "text-white" : "text-[rgba(238,238,255,0.4)] hover:text-[rgba(238,238,255,0.7)]"}
                 `}
             >
@@ -35,8 +35,8 @@ export default function ResponseToggle({ viewData, onChange }: ResponseTogglePro
             <button
                 onClick={() => onChange("detailed")}
                 className={`
-                    relative flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium
-                    transition-all duration-300 z-10
+                    relative flex items-center gap-2 px-4 py-2 min-h-[44px] rounded-lg text-xs md:text-sm font-medium
+                    transition-all duration-300 z-10 flex-shrink-0 whitespace-nowrap
                     ${viewData === "detailed" ? "text-white" : "text-[rgba(238,238,255,0.4)] hover:text-[rgba(238,238,255,0.7)]"}
                 `}
             >
@@ -54,8 +54,8 @@ export default function ResponseToggle({ viewData, onChange }: ResponseTogglePro
             <button
                 onClick={() => onChange("explanation")}
                 className={`
-                    relative flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium
-                    transition-all duration-300 z-10
+                    relative flex items-center gap-2 px-4 py-2 min-h-[44px] rounded-lg text-xs md:text-sm font-medium
+                    transition-all duration-300 z-10 flex-shrink-0 whitespace-nowrap
                     ${viewData === "explanation" ? "text-white" : "text-[rgba(238,238,255,0.4)] hover:text-[rgba(238,238,255,0.7)]"}
                 `}
             >
