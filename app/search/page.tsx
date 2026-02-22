@@ -855,13 +855,14 @@ function SearchResultsContent() {
                                                                 onClick={() => {
                                                                     const isVideo = answer.startsWith("VIDEO_DATA:");
                                                                     const url = answer.replace(isVideo ? "VIDEO_DATA:" : "IMAGE_DATA:", "");
-                                                                    const ext = isVideo ? "mp4" : "png";
+                                                                    const ext = isVideo ? "mp4" : "jpeg";
                                                                     handleDownload(url, `peak-ai-gen.${ext}`);
                                                                 }}
-                                                                className="p-2 rounded-full bg-white/10 hover:bg-white/20 border border-white/10 transition-colors"
-                                                                title="Save Media"
+                                                                className="flex items-center gap-1.5 px-4 py-2 rounded-full bg-gradient-to-r from-[#4f8fff]/20 to-[#8b5cf6]/20 hover:from-[#4f8fff]/30 hover:to-[#8b5cf6]/30 border border-white/10 hover:border-[#8b5cf6]/30 transition-all duration-300"
+                                                                title="Download generated media"
                                                             >
-                                                                <Save className="w-4 h-4 text-[#eeeeff]" />
+                                                                <Download className="w-4 h-4 text-[#eeeeff]" />
+                                                                <span className="text-xs text-[#eeeeff] font-medium">Download</span>
                                                             </motion.button>
                                                         )}
                                                     </div>
