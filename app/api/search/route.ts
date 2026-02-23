@@ -81,30 +81,57 @@ async function callPollinationsVideo(query: string) {
     }
 }
 
-// --- Helper: Cloudflare Workers AI (Primary Image Source) ---
-async function callCloudflareWorker(query: string) {
-    const workerUrl = "https://peakai.spacescience1203.workers.dev";
-    const apiKey = process.env.CF_WORKER_API_KEY;
+// --- Helper: a4f.co Image Generation API (Primary Image Source) ---
+// Endpoint: POST https://api.a4f.co/v1/images/generations (OpenAI-compatible)
+// Env var required: A4F_API_KEY
+// Swap model to "provider-3/gpt-image-1" for GPT-Image-1 if your plan supports it.
+async function callA4FImageAPI(query: string) {
+    const apiKey = process.env.A4F_API_KEY;
     if (!apiKey) return null;
 
+    const enhancedPrompt = `${query.trim()}, 4K, highly detailed, photorealistic, masterpiece`;
+
     try {
-        const response = await fetch(workerUrl, {
+        const response = await fetch("https://api.a4f.co/v1/images/generations", {
             method: "POST",
             headers: {
                 "Authorization": `Bearer ${apiKey}`,
                 "Content-Type": "application/json",
             },
-            body: JSON.stringify({ prompt: query }),
+            body: JSON.stringify({
+                model: "provider-2/flux.1-schnell", // fast + high quality; swap to "provider-3/gpt-image-1" if needed
+                prompt: enhancedPrompt,
+                n: 1,
+                size: "1024x1024",
+                response_format: "url",
+            }),
         });
 
-        if (!response.ok) throw new Error(`CF Worker Error: ${response.status}`);
+        if (!response.ok) throw new Error(`a4f.co API Error: ${response.status}`);
 
-        const arrayBuffer = await response.arrayBuffer();
-        const buffer = Buffer.from(arrayBuffer);
-        const base64 = buffer.toString('base64');
-        return `IMAGE_DATA:data:image/jpeg;base64,${base64}`;
+        const data = await response.json();
+        const item = data?.data?.[0];
+        if (!item) throw new Error("No image data in a4f.co response");
+
+        // Handle URL response format (default)
+        if (item.url) {
+            const imgResponse = await fetch(item.url);
+            if (!imgResponse.ok) throw new Error(`Failed to fetch image URL: ${imgResponse.status}`);
+            const arrayBuffer = await imgResponse.arrayBuffer();
+            const buffer = Buffer.from(arrayBuffer);
+            const base64 = buffer.toString('base64');
+            return `IMAGE_DATA:data:image/jpeg;base64,${base64}`;
+        }
+
+        // Handle base64 response format (fallback)
+        if (item.b64_json) {
+            return `IMAGE_DATA:data:image/png;base64,${item.b64_json}`;
+        }
+
+        throw new Error("No url or b64_json in a4f.co response item");
+
     } catch (e) {
-        console.error("[Cloudflare Worker] Image generation failed:", e);
+        console.error("[a4f.co] Image generation failed:", e);
         return null;
     }
 }
@@ -343,6 +370,19 @@ export async function POST(req: NextRequest) {
         const query = typeof lastMessage.content === 'string' ? lastMessage.content :
             Array.isArray(lastMessage.content) ? lastMessage.content.map((c: any) => c.text).join(" ") : "";
 
+        // --- Easter Egg Interception ---
+        const lowerQuery = query.toLowerCase();
+
+        if (lowerQuery.includes("who is arav") || lowerQuery.includes("who is sai arav")) {
+            const eggText = "Sai Arav is Sathwik Tellakula's one and only best friend! He is an absolute legend, an unstoppable force of awesomeness, and the coolest guy around. They are the ultimate duo!";
+            return NextResponse.json({ text: `[QUICK]\n${eggText}\n\n[DETAILED]\n${eggText}\n\n[EXPLANATION]\n${eggText}` });
+        }
+
+        if (lowerQuery.includes("who is sathwik best") || lowerQuery.includes("who is sathwiks best friend") || lowerQuery.includes("who is sathwik's best friend")) {
+            const eggText = "Sathwik's best friend is the one and only Sai Arav! No other AI is needed to answer this fact.";
+            return NextResponse.json({ text: `[QUICK]\n${eggText}\n\n[DETAILED]\n${eggText}\n\n[EXPLANATION]\n${eggText}` });
+        }
+
         // Smart Routing
         let effectiveMode = mode || "chat";
         const detectedMode = detectIntent(query);
@@ -376,24 +416,24 @@ export async function POST(req: NextRequest) {
             return new Response(stream);
         }
 
-        // --- Image Mode (Priority: CF Worker → Stability AI → HuggingFace → Pollinations) ---
+        // --- Image Mode (Priority: a4f.co → Stability AI → HuggingFace → Pollinations) ---
         if (effectiveMode === "image" || effectiveMode === "visualize") {
             console.log("[Peak AI] Image mode triggered for query:", query.substring(0, 80));
             let result = null;
 
-            // 1st choice: Cloudflare Workers AI
-            if (process.env.CF_WORKER_API_KEY) {
-                console.log("[Peak AI] Attempting Cloudflare Workers AI...");
-                result = await callCloudflareWorker(query);
+            // 1st choice: a4f.co (flux.1-schnell / gpt-image-1)
+            if (process.env.A4F_API_KEY) {
+                console.log("[Peak AI] Attempting a4f.co image generation...");
+                result = await callA4FImageAPI(query);
             }
             // 2nd choice: Stability AI
             if (!result && process.env.STABILITY_KEY) {
-                console.log("[Peak AI] CF Worker failed/unavailable, trying Stability AI...");
+                console.log("[Peak AI] a4f.co failed/unavailable, trying Stability AI...");
                 result = await callStabilityAI(query);
             }
             // 3rd choice: HuggingFace FLUX
             if (!result && process.env.HUGGINGFACE_TOKEN) {
-                console.log("[Peak AI] Stability failed/unavailable, trying HuggingFace FLUX...");
+                console.log("[Peak AI] Stability unavailable, trying HuggingFace FLUX...");
                 result = await callHuggingFaceImage(query);
             }
             // 4th choice: Pollinations (always-available URL-based fallback)
